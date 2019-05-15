@@ -69,6 +69,7 @@ main = do
       , appStartEvent = startup
       , appAttrMap = const $ theMap
       }
+    go :: IO AppState
     go = do
       finalState <- customMain (V.mkVty V.defaultConfig) (Just eventChan) app (defaultState replyChan spawnDialog1)
       pure finalState
