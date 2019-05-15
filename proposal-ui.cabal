@@ -19,12 +19,17 @@ extra-source-files:  CHANGELOG.md
 
 executable proposal-ui
   main-is:             Test.hs
-  ghc-options:         -threaded -Weverything
-  -- other-modules:
+  ghc-options:         -threaded -Weverything -Wno-implicit-prelude
+  other-modules:       PromptString
+                     , Dialog1
+                     , KeyToy
   other-extensions:    NamedFieldPuns
   build-depends:       base >=4.12 && <4.13
                      , vty
                      , vector
                      , brick
+                     , turtle
+                     , directory
+                     , text
   -- hs-source-dirs:
   default-language:    Haskell2010
