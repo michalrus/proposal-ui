@@ -4,7 +4,7 @@ module Dialog1 (spawnDialog1) where
 
 import qualified Brick.Widgets.List as L
 
-import           Types (Name(MainMenu), AppState(AppState, asLastMsg), Dialog(Dialog, dRender, dHandleEvent), CustomEvent)
+import           Types (Name(MainMenu), AppState(AppState, asLastMsg), Dialog(Dialog, dRender, dHandleEvent), CustomEvent, DialogReply(DialogReplyContinue, DialogReplyHalt))
 import           Brick (Widget, BrickEvent(VtyEvent), EventM, vBox, str, padLeftRight, withBorderStyle, strWrap, padAll)
 import qualified Brick.Widgets.Border.Style as BS
 import qualified Brick.Widgets.Border as B
@@ -42,7 +42,7 @@ lastMessage AppState{asLastMsg} = (withBorderStyle BS.unicodeBold . B.borderWith
 mkDlg1 :: Dialog1State -> Dialog
 mkDlg1 state = Dialog { dRender = dlg1Render state, dHandleEvent = dlg1HandleEvent state }
 
-dlg1HandleEvent :: Dialog1State -> AppState -> BrickEvent Name CustomEvent -> EventM Name (Either AppState Dialog)
+dlg1HandleEvent :: Dialog1State -> AppState -> BrickEvent Name CustomEvent -> EventM Name DialogReply
 dlg1HandleEvent dState as event = do
   let
     openThing :: EventM Name Dialog
@@ -67,23 +67,23 @@ dlg1HandleEvent dState as event = do
             }
         Just (_, TestFileChoice) -> do
           spawnFileChooser $ \mPath -> do
-            case mPath of
-              Just path -> pure $ Right $ mkDlg1 $ dState { dlg1Path = path }
-              Nothing -> pure $ Right $ mkDlg1 dState
+            pure $ case mPath of
+              Just path -> DialogReplyContinue $ mkDlg1 $ dState { dlg1Path = path }
+              Nothing -> DialogReplyContinue $ mkDlg1 dState
         Just (_, ProposalUI) -> do
           spawnProposalUI $ do
-            pure $ Right $ mkDlg1 dState
+            pure $ DialogReplyContinue $ mkDlg1 dState
         _ -> do
           pure $ mkDlg1 dState
   case event of
-    VtyEvent (V.EvKey (V.KChar 'q') []) -> pure $ Left as
+    VtyEvent (V.EvKey (V.KChar 'q') []) -> pure $ DialogReplyHalt as
     VtyEvent (V.EvKey V.KEnter []) -> do
-      Right <$> openThing
+      DialogReplyContinue <$> openThing
     VtyEvent evt -> do
       newlist <- L.handleListEventVi L.handleListEvent evt (dlg1MainList dState)
-      pure $ Right $ mkDlg1 dState { dlg1MainList = newlist }
+      pure $ DialogReplyContinue $ mkDlg1 dState { dlg1MainList = newlist }
     _ -> do
-      pure $ Right $ mkDlg1 dState
+      pure $ DialogReplyContinue $ mkDlg1 dState
 
 spawnDialog1 :: Dialog
 spawnDialog1 = mkDlg1 state

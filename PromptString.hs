@@ -13,21 +13,21 @@ import Types
 data PromptString = PromptString
   { psTitle :: String
   , psValidator :: String -> Bool
-  , psCallback :: String -> EventM Name (Either AppState Dialog)
+  , psCallback :: String -> EventM Name DialogReply
   , psCurrentString :: String
   }
 
-spawnPromptString :: String -> (String -> Bool) -> (String -> EventM Name (Either AppState Dialog)) -> EventM Name (Either AppState Dialog)
+spawnPromptString :: String -> (String -> Bool) -> (String -> EventM Name DialogReply) -> EventM Name DialogReply
 spawnPromptString title validator callback = do
   let
     state = PromptString title validator callback ""
-  pure $ Right $ mkPromptString state
+  pure $ DialogReplyContinue $ mkPromptString state
 
 mkPromptString :: PromptString -> Dialog
 mkPromptString state = Dialog { dRender = renderUI state, dHandleEvent = handleEvents state }
 
 renderUI :: PromptString -> AppState -> [ Widget Name ]
-renderUI PromptString{psCurrentString,psValidator,psTitle} astate = [ center root ]
+renderUI PromptString{psCurrentString,psValidator,psTitle} _astate = [ center root ]
   where
     root :: Widget Name
     root = B.borderWithLabel (str psTitle) $ vBox [ pad, padLeftRight 1 $ currentStr, pad ]
@@ -36,18 +36,18 @@ renderUI PromptString{psCurrentString,psValidator,psTitle} astate = [ center roo
     currentStr' = str psCurrentString
     pad = str $ replicate (length psTitle) ' '
 
-handleEvents :: PromptString -> AppState -> BrickEvent Name CustomEvent -> EventM Name (Either AppState Dialog)
-handleEvents pstate@PromptString{psCallback,psCurrentString} astate event = do
+handleEvents :: PromptString -> AppState -> BrickEvent Name CustomEvent -> EventM Name DialogReply
+handleEvents pstate@PromptString{psCallback,psCurrentString} _astate event = do
   case event of
     VtyEvent (V.EvKey V.KEnter []) -> do
       -- TODO, allows invalid strings passed to callback
       psCallback psCurrentString
     VtyEvent (V.EvKey (V.KChar char) []) -> do
-      pure $ Right $ mkPromptString $ pstate { psCurrentString = psCurrentString <> [char] }
+      pure $ DialogReplyContinue $ mkPromptString $ pstate { psCurrentString = psCurrentString <> [char] }
     VtyEvent (V.EvKey V.KBS []) -> do
       let
         size = length psCurrentString
         newstring = take (size - 1) psCurrentString
-      pure $ Right $ mkPromptString $ pstate { psCurrentString = newstring }
+      pure $ DialogReplyContinue $ mkPromptString $ pstate { psCurrentString = newstring }
     other -> do
-      pure $ Right $ mkPromptString $ pstate { psTitle = show other }
+      pure $ DialogReplyContinue $ mkPromptString $ pstate { psTitle = show other }

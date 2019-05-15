@@ -3,7 +3,7 @@ module FileChooser (spawnFileChooser) where
 import System.Directory (canonicalizePath, getDirectoryContents, doesDirectoryExist)
 import Control.Monad.IO.Class (liftIO)
 
-import Types (Name(FileChoice), Dialog(Dialog,dRender, dHandleEvent), AppState, CustomEvent)
+import Types (Name(FileChoice), Dialog(Dialog,dRender, dHandleEvent), AppState, CustomEvent, DialogReply(DialogReplyContinue))
 import Brick (EventM, Widget, BrickEvent(VtyEvent), str, padLeftRight)
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as L
@@ -20,7 +20,7 @@ instance Ord FileEntry where
   compare (File _) (Directory _) = GT
 
 data ChooserState = ChooserState
-  { csCallback :: Maybe String -> EventM Name (Either AppState Dialog)
+  { csCallback :: Maybe String -> EventM Name DialogReply
   , csCurrentDir :: FilePath
   , csList :: L.List Name FileEntry
   }
@@ -36,7 +36,7 @@ generateCurrentListing dir = do
   files' <- mapM toFileEntry files
   pure $ L.list FileChoice (V.fromList $ sort files') 1
 
-spawnFileChooser :: (Maybe String -> EventM Name (Either AppState Dialog)) -> EventM Name Dialog
+spawnFileChooser :: (Maybe String -> EventM Name DialogReply) -> EventM Name Dialog
 spawnFileChooser callback = do
   currentDir <- liftIO $ canonicalizePath "."
   listState <- liftIO $ generateCurrentListing currentDir
@@ -54,13 +54,13 @@ renderFileChooser state _as = [ box ]
     renderRow _ (Directory name) = str (name <> "/")
     renderRow _ (File name) = str name
 
-handleEventFileChooser :: ChooserState -> AppState -> BrickEvent Name CustomEvent -> EventM Name (Either AppState Dialog)
+handleEventFileChooser :: ChooserState -> AppState -> BrickEvent Name CustomEvent -> EventM Name DialogReply
 handleEventFileChooser state _as event = do
   case event of
     VtyEvent (V.EvKey (V.KChar 'q') []) -> do
       (csCallback state) Nothing
     VtyEvent evt -> do
       newlist <- L.handleListEventVi L.handleListEvent evt (csList state)
-      pure $ Right $ mkFileChooser $ state { csList = newlist }
+      pure $ DialogReplyContinue $ mkFileChooser $ state { csList = newlist }
     _ -> do
-      pure $ Right $ mkFileChooser state
+      pure $ DialogReplyContinue $ mkFileChooser state

@@ -4,7 +4,10 @@
 
 module Main (main) where
 
-import Brick (Widget, BrickEvent, EventM, Next, App(App, appDraw, appChooseCursor, appHandleEvent, appStartEvent, appAttrMap), on, continue, showFirstCursor, customMain, halt)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad (when)
+
+import Brick (Widget, BrickEvent, EventM, Next, App(App, appDraw, appChooseCursor, appHandleEvent, appStartEvent, appAttrMap), on, continue, showFirstCursor, customMain, halt, getVtyHandle, suspendAndResume)
 import qualified Brick.AttrMap as A
 import           Brick.BChan (BChan, newBChan)
 import qualified Brick.Widgets.List as L
@@ -13,7 +16,7 @@ import qualified Graphics.Vty as V
 import Brick.Forms
 
 import Dialog1 (spawnDialog1)
-import Types (Dialog(dRender, dHandleEvent), AppState(AppState, asDialogStack, asLastMsg), Name, CustomEvent)
+import Types (Dialog(dRender, dHandleEvent), AppState(AppState, asDialogStack, asLastMsg), Name, CustomEvent, DialogReply(DialogReplyHalt, DialogReplyContinue, DialogReplyLiftIO))
 
 data CurrentWindow = MainWindow deriving Eq
 
@@ -33,10 +36,26 @@ drawUI state = (dRender . asDialogStack) state state
 
 handleEvent :: AppState -> BrickEvent Name CustomEvent -> EventM Name (Next (AppState))
 handleEvent state@AppState{asDialogStack} event = do
+  let
+    thing :: IO Dialog -> IO AppState
+    thing ioact = do
+      dlg <- ioact
+      pure $ state { asDialogStack = dlg }
+    go :: DialogReply -> EventM Name (Next AppState)
+    go reply = do
+      case reply of
+        DialogReplyHalt s -> halt s
+        DialogReplyContinue dlg -> continue $ state { asDialogStack = dlg }
+        DialogReplyLiftIO ioact -> suspendAndResume (thing ioact)
   newDlg <- (dHandleEvent asDialogStack) state event
-  case newDlg of
-    Left s -> halt s
-    Right dlg -> continue $ state { asDialogStack = dlg }
+  go newDlg
+
+startup :: AppState -> EventM Name AppState
+startup astate = do
+  vty <- getVtyHandle
+  let output = V.outputIface vty
+  when (V.supportsMode output V.BracketedPaste) $ liftIO $ V.setMode output V.BracketedPaste True
+  pure astate
 
 main :: IO ()
 main = do
@@ -47,7 +66,7 @@ main = do
       { appDraw = drawUI
       , appChooseCursor = showFirstCursor
       , appHandleEvent = handleEvent
-      , appStartEvent = \x -> pure x
+      , appStartEvent = startup
       , appAttrMap = const $ theMap
       }
     go = do

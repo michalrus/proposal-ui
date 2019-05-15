@@ -19,17 +19,49 @@ extra-source-files:  CHANGELOG.md
 
 executable proposal-ui
   main-is:             Test.hs
-  ghc-options:         -threaded -Weverything -Wno-implicit-prelude
+  ghc-options:         -threaded -Weverything -Wno-implicit-prelude -Wno-missing-import-lists -Wno-missing-local-signatures -Wno-missing-exported-signatures
   other-modules:       PromptString
                      , Dialog1
                      , KeyToy
+                     , UpdateLogic
+                     , Appveyor
+                     , Utils
+                     , Iohk.Types
+                     , Arch
   other-extensions:    NamedFieldPuns
   build-depends:       base >=4.12 && <4.13
-                     , vty
-                     , vector
+                     , aeson
+                     , amazonka
+                     , amazonka-s3
+                     , ansi-terminal
                      , brick
-                     , turtle
+                     , bytestring
+                     , cassava
+                     , containers
+                     , cryptonite
                      , directory
+                     , errors
+                     , exceptions
+                     , hourglass
+                     , http-client
+                     , http-client-tls
+                     , http-conduit
+                     , http-types
+                     , lens
+                     , lens-aeson
+                     , managed
+                     , memory
+                     , network-uri
+                     , process
+                     , resourcet
+                     , safe
+                     , system-filepath
                      , text
+                     , time
+                     , turtle
+                     , unordered-containers
+                     , vector
+                     , vty
+                     , yaml
   -- hs-source-dirs:
   default-language:    Haskell2010

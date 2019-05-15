@@ -1,4 +1,6 @@
-module Types (Name(FileChoice, MainMenu, Menu1), Dialog(Dialog, dRender, dHandleEvent), AppState(AppState, asLastMsg, asDialogStack, asReplyChan), CustomEvent) where
+{-# LANGUAGE ExistentialQuantification #-}
+
+module Types (Name(FileChoice, MainMenu, Menu1), Dialog(Dialog, dRender, dHandleEvent), AppState(AppState, asLastMsg, asDialogStack, asReplyChan), CustomEvent, DialogReply(DialogReplyHalt, DialogReplyContinue, DialogReplyLiftIO)) where
 
 import           Brick.BChan (BChan)
 import           Brick (Widget, EventM, BrickEvent)
@@ -11,9 +13,11 @@ data AppState = AppState
   , asDialogStack :: Dialog
   }
 
+data DialogReply = DialogReplyHalt AppState | DialogReplyContinue Dialog | forall a . DialogReplyLiftIO (IO Dialog)
+
 data Dialog = Dialog
   { dRender :: AppState -> [ Widget Name ]
-  , dHandleEvent :: AppState -> BrickEvent Name CustomEvent -> EventM Name (Either AppState Dialog)
+  , dHandleEvent :: AppState -> BrickEvent Name CustomEvent -> EventM Name DialogReply
   }
 
 data CustomEvent = CustomEvent  deriving Show
