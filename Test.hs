@@ -71,7 +71,10 @@ main = do
       }
     go :: IO AppState
     go = do
-      finalState <- customMain (V.mkVty V.defaultConfig) (Just eventChan) app (defaultState replyChan spawnDialog1)
+      let
+        mkVty = V.mkVty V.defaultConfig
+      vty <- mkVty
+      finalState <- customMain vty mkVty (Just eventChan) app (defaultState replyChan spawnDialog1)
       pure finalState
   finalState <- go
   print $ asLastMsg finalState
