@@ -5,33 +5,33 @@
 module ProposalUI (spawnProposalUI) where
 
 import qualified Data.Text as T
-import Data.Maybe
-import Control.Monad.Managed
+import           Data.Maybe (isJust, fromMaybe, fromJust)
+import           Control.Monad.Managed (Managed, MonadIO)
 import qualified System.Process             as P
-import           Turtle (FilePath, Shell, system, empty,single,die,format,(%),w,printf,s,fp, (<.>), testfile, readTextFile, join, fromString)
-import Data.Time.Clock
-import Data.Time.Format
+import           Turtle (FilePath, Shell, system, empty,single,die,format,(%),w,printf,s,fp, (<.>), testfile, readTextFile, join, fromString, encodeString, with, liftIO)
+import           Data.Time.Clock (getCurrentTime)
+import           Data.Time.Format (formatTime, defaultTimeLocale, iso8601DateFormat)
 import qualified Data.ByteString.Lazy.Char8 as L8
-import           Data.Aeson                 hiding (Options, encodeFile)
+import           Data.Aeson (Value(Object, String), encode, toJSON)
 import qualified Data.HashMap.Strict        as HM
 
-import Brick
+import Brick (Widget, BrickEvent(VtyEvent), EventM, vBox, str, strWrap, txt, padLeftRight)
 import qualified Graphics.Vty as V
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as L
 import qualified Data.Vector as V
 
-import Types
-import PromptString
+import Types (Dialog(Dialog, dRender, dHandleEvent), AppState, Name(Menu1), DialogReply(DialogReplyContinue, DialogReplyLiftIO), CustomEvent)
+import PromptString (spawnPromptString)
 
-import Iohk.Types
-import UpdateLogic
-import InstallerVersions
+import Iohk.Types (Environment(Testnet, Development, Staging, Production))
+import Arch (Arch(Win64, Mac64, Linux64), ArchMap, archMapEach, idArchMap, archMapFromList, archMapToList, archMap, lookupArch)
+import UpdateLogic (InstallersResults(globalResult, ciResults, InstallersResults), CIResult2(CIFetchedResult, cifBlakeCbor, cifLocal, cifSha256, cifResult), CIResult(CIResult, ciResultUrl, ciResultDownloadUrl, ciResultBuildNumber, ciResultArch, ciResultSHA1Sum, ciResultFilename), InstallerPredicate, BucketInfo(BucketInfo, biBucket), installerPredicates, selectBuildNumberPredicate, getInstallersResults, updateVersionJson, runAWS', uploadHashedInstaller, uploadSignature)
+import InstallerVersions (GlobalResults(GlobalResults, grCardanoCommit, grDaedalusCommit, grApplicationVersion, grCardanoVersion, grDaedalusVersion), installerNetwork, InstallerNetwork(InstallerTestnet, InstallerStaging, InstallerMainnet))
 import Github (Rev)
-import Utils
+import Utils (tt)
 
-import ProposalUI.Types
-import RunCardano
+import ProposalUI.Types (ProposalUIState(psCallback, psOutputDir, psDaedalusRev, psInstallers, psDownloadVersionInfo, ProposalUIState, psMenuState), MenuChoices(SetDaedalusRev, FindInstallers, SignInstallers, S3Upload, UpdateVersionJSON), InstallerData(InstallerData, idResults), DownloadVersionInfo(DownloadVersionInfo, dviVersion, dviURL, dviHash, dviSignature, dviSHA256), DownloadVersionJson(DownloadVersionJson))
 
 mkProposalUI :: ProposalUIState -> Dialog
 mkProposalUI state = Dialog { dRender = renderUI state, dHandleEvent = handleEvents state }
@@ -101,11 +101,8 @@ configurationKeys env' _ = error $ "Application versions not used in '" <> show 
 -- .asc files next to the installers which will be picked up in the
 -- upload S3 step.
 updateProposalSignInstallers :: InstallersResults -> Maybe T.Text -> IO ()
-updateProposalSignInstallers params userId = do
-  let
-    things :: [Turtle.FilePath]
-    things = map (cifLocal) (ciResults params)
-  mapM_ signInstaller things
+updateProposalSignInstallers InstallersResults{ciResults} userId = do
+  mapM_ signInstaller $ map cifLocal $ ciResults
   where
     -- using system instead of procs so that tty is available to gpg
     signInstaller f = system (P.proc "gpg2" $ map T.unpack $ gpgArgs f) empty
@@ -169,7 +166,7 @@ uploadInstallers bucket res = runAWS' $ forResults res upload
       let
         hash = T.pack $ show $ cifBlakeCbor ci
       printf ("***   "%s%"  "%fp%"\n") hash (cifLocal ci)
-      uploadHashedInstaller bucket (cifLocal ci) (globalResult res) hash
+      uploadHashedInstaller bucket (cifLocal ci) (globalResult res) (hash, T.pack $ encodeString $ ciResultFilename $ cifResult ci)
 
 -- | Perform an action on the CI result of each arch.
 forResults :: MonadIO io => InstallersResults -> (Arch -> CIResult2 -> io b) -> io (ArchMap b)
@@ -292,7 +289,7 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
                 state2 = state1 { psMenuState = generateNewMenu state1 }
               pure $ mkProposalUI state2
           UpdateVersionJSON -> do
-            liftIO $ updateVersionJSON bucket (fromJust psDownloadVersionInfo)
+            _url <- liftIO $ updateVersionJSON bucket (fromJust psDownloadVersionInfo)
             pure $ DialogReplyContinue $ mkProposalUI pstate
         Nothing -> pure $ DialogReplyContinue $ mkProposalUI pstate -- nothing selected, do nothing
   case event of

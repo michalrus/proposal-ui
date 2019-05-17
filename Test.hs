@@ -11,9 +11,8 @@ import Brick (Widget, BrickEvent, EventM, Next, App(App, appDraw, appChooseCurso
 import qualified Brick.AttrMap as A
 import           Brick.BChan (BChan, newBChan)
 import qualified Brick.Widgets.List as L
---import qualified Brick.Widgets.ProgressBar as P
 import qualified Graphics.Vty as V
-import Brick.Forms
+import Brick.Forms (focusedFormInputAttr, invalidFormInputAttr)
 
 import Dialog1 (spawnDialog1)
 import Types (Dialog(dRender, dHandleEvent), AppState(AppState, asDialogStack, asLastMsg), Name, CustomEvent, DialogReply(DialogReplyHalt, DialogReplyContinue, DialogReplyLiftIO))

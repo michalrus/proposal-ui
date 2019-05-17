@@ -2,13 +2,13 @@
 
 module PromptString (spawnPromptString) where
 
-import Brick
-import Brick.Widgets.Center
+import           Brick (EventM, Widget, BrickEvent(VtyEvent), padLeftRight, str, withDefAttr, vBox)
+import           Brick.Widgets.Center (center)
 import qualified Graphics.Vty as V
 import qualified Brick.Widgets.Border as B
-import Brick.Forms
+import           Brick.Forms (focusedFormInputAttr, invalidFormInputAttr)
 
-import Types
+import Types (Name, DialogReply(DialogReplyContinue), Name, Dialog(dRender, dHandleEvent, Dialog), CustomEvent, AppState)
 
 data PromptString = PromptString
   { psTitle :: String

@@ -1,17 +1,22 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module ProposalUI.Types where
+module ProposalUI.Types
+  ( DownloadVersionInfo(..)
+  , MenuChoices(..)
+  , ProposalUIState(..)
+  , DownloadVersionJson(..)
+  , InstallerData(..)
+  ) where
 
-import Data.Text
-import           Data.Aeson                 hiding (Options, encodeFile)
-import Turtle
+import           Data.Aeson         (ToJSON, toJSON, object, (.=))
+import Turtle (Text, FilePath)
 
-import Brick
+import Brick (EventM)
 import qualified Brick.Widgets.List as L
 
-import Arch
-import Types
-import UpdateLogic
+import Arch (ArchMap)
+import Types (Name, DialogReply)
+import UpdateLogic (InstallersResults)
 
 -- | Intermediate data type for the daedalus download json file.
 data DownloadVersionInfo = DownloadVersionInfo
@@ -38,8 +43,6 @@ data DownloadVersionJson = DownloadVersionJson
 
 instance ToJSON DownloadVersionJson where
   toJSON (DownloadVersionJson dvis releaseNotes) = object [ "platforms" .= dvis, "release_notes" .= releaseNotes ]
-
-type InstallerHashes = ArchMap Text
 
 data MenuChoices = SetDaedalusRev | FindInstallers | SignInstallers | S3Upload | UpdateVersionJSON deriving Show
 

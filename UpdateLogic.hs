@@ -11,25 +11,17 @@
 
 module UpdateLogic
   ( getInstallersResults
-  , realFindInstallers
-  , InstallerPredicate
-  , selectBuildNumberPredicate
-  , installerPredicates
-  , CIResult(..)
+  , InstallersResults(..)
   , CIResult2(..)
+  , CIResult(..)
+  , BucketInfo(..)
+  , InstallerPredicate
+  , installerPredicates
+  , selectBuildNumberPredicate
+  , updateVersionJson
+  , runAWS'
   , uploadHashedInstaller
   , uploadSignature
-  , updateVersionJson
-  , githubWikiRecord
-  , printInstallersResults
-  , CISystem(..)
-  , InstallersResults(..)
-  , GlobalResults(..)
-  , parseStatusContext
-  , StatusContext(..)
-  , bucketRegion
-  , runAWS'
-  , BucketInfo(..)
   ) where
 
 import           Appveyor                         (AppveyorArtifact (AppveyorArtifact),
@@ -97,12 +89,10 @@ import           InstallerVersions                (GlobalResults (GlobalResults,
                                                    InstallerNetwork (InstallerMainnet, InstallerStaging, InstallerTestnet),
                                                    findVersionInfo,
                                                    installerNetwork)
-import           Iohk.Types                            (ApplicationVersion,
-                                                   ApplicationVersionKey,
-                                                   Arch (Linux64, Mac64, Win64),
-                                                   formatArch)
+import           Iohk.Types                            (ApplicationVersion)
 import           Utils                            (fetchCachedUrl,
                                                    fetchCachedUrlWithSHA1)
+import Arch (Arch(Win64, Linux64, Mac64), ApplicationVersionKey, formatArch)
 
 import Temp (installerHash)
 
@@ -358,9 +348,6 @@ printInstallersResults InstallersResults{..} = T.putStr $ T.unlines
   [rule, formatVersionInfo globalResult, "", formatCIResults ciResults, rule]
   where
     rule = "============================================================" :: Text
-    getInner :: CIResult2 -> CIResult
-    getInner CIFetchedResult{cifResult} = cifResult
-    innerResults = map getInner ciResults
 
 data StatusContext = StatusContextAppveyor Appveyor.Username Appveyor.Project ApplicationVersion
                    | StatusContextBuildkite Text Int
@@ -443,23 +430,24 @@ withinBucketRegion bucketName action = do
 
 type AWSMeta = HashMap.HashMap Text Text
 
-uploadHashedInstaller :: BucketInfo -> FilePath -> GlobalResults -> Text -> AWS Text
-uploadHashedInstaller BucketInfo{biURLBase,biBucket} localPath GlobalResults{grDaedalusCommit,grCardanoCommit,grApplicationVersion} hash =
-  withinBucketRegion (BucketName biBucket) $ \_ -> do
-    uploadOneFile (BucketName biBucket) localPath (ObjectKey hash) meta
-    copyObject' hashedPath key
-    pure $ cdnLink biURLBase key
-
-  where
-    key = simpleKey localPath
-    hashedPath = biBucket <> "/" <> hash
-
+uploadHashedInstaller :: BucketInfo -> FilePath -> GlobalResults -> (Text,Text) -> AWS Text
+uploadHashedInstaller BucketInfo{biURLBase,biBucket} localPath GlobalResults{grDaedalusCommit,grCardanoCommit,grApplicationVersion} (hash', filename') = do
+  let
+    bucket = BucketName biBucket
     meta = HashMap.fromList
       [ ("daedalus-revision", grDaedalusCommit)
       , ("cardano-revision", grCardanoCommit)
       , ("application-version", (T.pack. show) grApplicationVersion)
       ] :: AWSMeta
+    hashedPath = biBucket <> "/" <> hash'
+    file1 = ObjectKey hash'
+    file2 = ObjectKey filename'
+  withinBucketRegion bucket $ \_ -> do
+    uploadOneFile bucket localPath file1 meta
+    copyObject' hashedPath file2
+    pure $ cdnLink biURLBase file2
 
+  where
     copyObject' :: Text -> ObjectKey -> AWS ()
     copyObject' source dest = void . send $ Lens.set coACL (Just OPublicRead) $ copyObject (BucketName biBucket) source dest
 

@@ -4,7 +4,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
 
-module Utils where
+module Utils
+  ( fetchJson'
+  , tt
+  , fetchJson
+  , fetchCachedUrl
+  , fetchCachedUrlWithSHA1) where
 
 import           Prelude                   hiding (FilePath)
 import           Data.Aeson                (FromJSON, decode)
@@ -19,14 +24,8 @@ import           Network.HTTP.Client       (httpLbs, parseRequest,
 import           Network.HTTP.Client.TLS   (newTlsManager)
 import           Network.HTTP.Types.Header (RequestHeaders)
 import           System.Exit               (ExitCode (ExitFailure, ExitSuccess))
-import qualified Data.Aeson                    as AE
-import qualified Data.Char                     as C
 import           Data.Text                        (Text)
-import           GHC.Generics              hiding (from, to)
 import           Turtle
-import           Network.AWS               (Region)
-import           Network.AWS.S3            (BucketName(..), ObjectKey(..))
-import qualified Network.AWS.Data          as AWS
 
 fetchCachedUrl :: HasCallStack => T.Text -> FilePath -> FilePath -> IO ()
 fetchCachedUrl url name outPath = fetchCachedUrl' url name outPath Nothing
@@ -65,50 +64,5 @@ fetchUrl extraHeaders url = do
   resp <- httpLbs req' man
   return $ responseBody resp
 
-
-
--- * Flags & enumerables
---
-every :: (Bounded a, Enum a) => [a]
-every = enumFromTo minBound maxBound
-
--- | Sum to track assurance
-data Confirmation = Confirm | Ask Text
-  deriving (Eq, Read, Show)
-
-confirmOrTerminate :: Confirmation -> IO ()
-confirmOrTerminate  Confirm       = pure ()
-confirmOrTerminate (Ask question) = do
-  echo $ unsafeTextToLine question <> "  Enter 'yes' to proceed:"
-  reply <- readline
-  unless (reply == Just "yes") $ do
-    echo "User declined to proceed, exiting."
-    exit $ ExitFailure 1
-
--- * Utils
-showT :: Show a => a -> Text
-showT = T.pack . show
-
-readT :: Read a => Text -> a
-readT = read . T.unpack
-
-lowerShowT :: Show a => a -> Text
-lowerShowT = T.toLower . T.pack . show
-
-errorT :: HasCallStack => Text -> a
-errorT = error . T.unpack
-
 tt :: FilePath -> Text
 tt = format fp
-
--- Currently unused, but that's mere episode of the used/unused/used/unused event train.
--- Let's keep it, because it's too painful to reinvent every time we need it.
-jsonLowerStrip :: (Generic a, AE.GToJSON AE.Zero (Rep a)) => Int -> a -> AE.Value
-jsonLowerStrip n = AE.genericToJSON $ AE.defaultOptions { AE.fieldLabelModifier = map C.toLower . drop n }
-
--- | Returns the public download URL for an object in S3, according to
--- the AWS path-style convention.
--- https://docs.aws.amazon.com/AmazonS3/latest/dev/RESTAPI.html
-s3Link :: Region -> BucketName -> ObjectKey -> Text
-s3Link region (BucketName bucket) (ObjectKey key) =
-  mconcat [ "https://s3-", AWS.toText region, ".amazonaws.com/" , bucket, "/", key ]

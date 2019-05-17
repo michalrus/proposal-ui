@@ -5,29 +5,15 @@
 -- fixme: need to have better error handling and return Eithers from endpoint functions.
 
 module Buildkite.API
-  ( listArtifactsForBuild
-  , listArtifactsForJob
-  , getArtifact
-  , getArtifact'
-  , getArtifactURL
-  , getBuild
-  , getBuildsForPipeline
-  , getLatestBuildForPipeline
-  , getJobLog
-  , ID(..)
+  ( APIToken(APIToken)
   , Artifact(..)
-  , Build(..)
-  , Job(..)
-  , APIToken(..)
-  , Paging(..)
+  , listArtifactsForBuild
+  , getArtifactURL
   ) where
 
 import           Network.HTTP.Simple
 import           Network.HTTP.Conduit (redirectCount)
 import           Data.Text (Text)
-import           Data.ByteString (ByteString)
-import qualified Data.ByteString.Lazy.Char8 as L8
-import qualified Data.ByteString.Char8 as S8
 import           GHC.Generics
 import           Data.Aeson
 import           Data.Aeson.Types (Options(..), camelTo2)
@@ -35,9 +21,6 @@ import           Network.URI (URI(..), parseURI)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.String
-import           Crypto.Hash
-import           Control.Error
-import qualified Data.ByteArray.Encoding as B (Base(..), convertToBase)
 
 ----------------------------------------------------------------------------
 -- types
@@ -164,9 +147,6 @@ data Paging = Paging { pageNum :: Int
 
 data ArtifactDownload = ArtifactDownload { unArtifactDownload :: Text }
 
-defaultPaging :: Paging
-defaultPaging = Paging 1 30
-
 ----------------------------------------------------------------------------
 -- api calls
 
@@ -182,49 +162,6 @@ listArtifactsForBuild t org pipeline buildNum = getResponseBody <$> httpJSON req
   where
     req = makeRequest t path
     path = buildPath org pipeline buildNum ++ [ "artifacts" ]
-
--- https://buildkite.com/docs/rest-api/artifacts#list-artifacts-for-a-job
-listArtifactsForJob :: APIToken      -- ^ token generated in buildkite settings
-                    -> Text          -- ^ organization slug, e.g. input-output-hk
-                    -> Text          -- ^ pipeline slug, e.g. iohk-ops
-                    -> Int           -- ^ build number
-                    -> ID            -- ^ job id
-                    -> IO [Artifact] -- ^ artifact data records belonging to the job
-listArtifactsForJob t org pipeline buildNum jobId = getResponseBody <$> httpJSON req
-  where
-    req = makeRequest t path
-    path = buildPath org pipeline buildNum ++ [ "jobs", unID jobId, "artifacts" ]
-
--- | Downloads an artifact file and checks its hash.
--- The entire file is read into memory.
--- https://buildkite.com/docs/rest-api/artifacts#download-an-artifact
-getArtifact :: APIToken       -- ^ token generated in buildkite settings
-            -> Text          -- ^ organization slug, e.g. input-output-hk
-            -> Text          -- ^ pipeline slug, e.g. iohk-ops
-            -> Int           -- ^ build number
-            -> Artifact      -- ^ Artifact record
-            -> IO ByteString -- ^ Contents of the artifact file
-getArtifact t org pipeline buildNum art@Artifact{..} = do
-  file <- L8.toStrict <$> getArtifact' t org pipeline buildNum art
-  case checkHash artifactSha1sum file of
-    Just hash' -> error $ mconcat [ "Bad hash: expected "
-                                 , T.unpack artifactSha1sum
-                                 , ", got "
-                                 , T.unpack hash' ]
-    Nothing -> return file
-
--- | Downloads an artifact file, streamed as a lazy bytestring.
--- https://buildkite.com/docs/rest-api/artifacts#download-an-artifact
-getArtifact' :: APIToken
-             -> Text
-             -> Text
-             -> Int
-             -> Artifact
-             -> IO L8.ByteString
-getArtifact' t org pipeline buildNum art = do
-  url <- getArtifactURL t org pipeline buildNum art
-  req <- parseRequest (T.unpack url)
-  getResponseBody <$> httpLBS req
 
 -- | Returns the URL for downloading an artifact.
 -- Although the returned URL might be in our own public S3 bucket,
@@ -242,54 +179,6 @@ getArtifactURL t org pipeline buildNum Artifact{..} =
     req = makeRequest t path
     path = buildPath org pipeline buildNum ++
            [ "jobs", unID artifactJobId, "artifacts", unID artifactId, "download" ]
-
--- | Gets a build using the pipeline build number.
--- https://buildkite.com/docs/rest-api/builds#get-a-build
-getBuild :: APIToken         -- ^ token generated in buildkite settings
-         -> Text             -- ^ organization slug, e.g. input-output-hk
-         -> Text             -- ^ pipeline slug, e.g. iohk-ops
-         -> Int              -- ^ Build number
-         -> IO Build         -- ^ Info about the build
-getBuild t org pipeline num = getResponseBody <$> httpJSON req
-  where
-    req = makeRequest t (buildPath org pipeline num)
-
--- | Lists builds for a pipeline.
--- https://buildkite.com/docs/rest-api/builds#list-builds-for-a-pipeline
-getBuildsForPipeline :: APIToken        -- ^ token generated in buildkite settings
-                     -> Text            -- ^ organization slug, e.g. input-output-hk
-                     -> Text            -- ^ pipeline slug, e.g. iohk-ops
-                     -> [(Text, Text)]  -- ^ Search query
-                     -> Paging          -- ^ Which page to fetch
-                     -> IO [Build]      -- ^ Page full of builds
-getBuildsForPipeline t org pipeline search page = getResponseBody <$> httpJSON req
-  where
-    req = addSearchParams search $ setPaging page $ makeRequest t path
-    path = [ "organizations", org, "pipelines", pipeline, "builds" ]
-
-addSearchParams :: [(Text, Text)] -> Request -> Request
-addSearchParams ps req = setRequestQueryString q' req
-  where
-    q' = getRequestQueryString req ++ q
-    q = [(T.encodeUtf8 f, Just (T.encodeUtf8 v)) | (f, v) <- ps]
-
--- | Gets the latest successful build for a pipeline. Works under the
--- assumption that the API returns builds in date-descending order.
-getLatestBuildForPipeline :: APIToken      -- ^ token generated in buildkite settings
-                          -> Text          -- ^ organization slug, e.g. input-output-hk
-                          -> Text          -- ^ pipeline slug, e.g. iohk-ops
-                          -> IO (Maybe Build)
-getLatestBuildForPipeline t org pipeline =
-  headMay <$> getBuildsForPipeline t org pipeline q (Paging 1 1)
-  where
-    q :: [ (Text,Text) ]
-    q = [("state", "passed")]
-
--- | Gets the full text of the job's build log.
-getJobLog :: APIToken -> Job -> IO L8.ByteString
-getJobLog t j = do
-  req <- parseRequest . T.unpack . jobRawLogUrl $ j
-  getResponseBody <$> httpLBS (addUserAgentHeader . addAuthHeader t $ req)
 
 ----------------------------------------------------------------------------
 -- util
@@ -317,24 +206,6 @@ addAuthHeader (APIToken token) = setRequestHeader "Authorization"
 
 setRedirectCount :: Int -> Request -> Request
 setRedirectCount n req = req { redirectCount = n }
-
-setPaging :: Paging -> Request -> Request
-setPaging (Paging num count) = setRequestQueryString [q "page" num, q "per_page" count]
-  where
-    q field val = (field, Just . S8.pack . show $ val)
-
--- | Compare hashes, return something if they are unequal
-checkHash :: Text -> ByteString -> Maybe Text
-checkHash h b | calc == T.encodeUtf8 h = Nothing
-              | otherwise = Just (T.decodeUtf8 calc)
-  where
-    calc = b16 (hash b :: Digest SHA1)
-    b16 :: Digest SHA1 -> ByteString
-    b16 = B.convertToBase B.Base16
-
--- | Decode UTF-8 response into strict text
-getResponseText :: Response L8.ByteString -> Text
-getResponseText = T.decodeUtf8 . L8.toStrict . getResponseBody
 
 ----------------------------------------------------------------------------
 -- deserialization from api

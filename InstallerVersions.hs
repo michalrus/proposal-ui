@@ -27,11 +27,12 @@ import           Turtle
 import Control.Monad.Managed (MonadManaged)
 
 import           Cardano                    (ConfigurationYaml,
-                                             applicationVersion, update)
+                                             applicationVersion, update, ConfigurationRoot)
 import           Github                     (Rev)
 import           Nix                        (nixBuildExpr, nixEvalExpr)
 import           Iohk.Types
 import           Utils                      (tt)
+import Arch (ApplicationVersionKey, Arch(Win64, Mac64))
 
 data GlobalResults = GlobalResults {
       grCardanoCommit      :: Text
@@ -44,7 +45,7 @@ data GlobalResults = GlobalResults {
 instance FromJSON GlobalResults
 instance ToJSON GlobalResults
 
-findVersionInfo :: MonadManaged m => ApplicationVersionKey -> Rev -> m GlobalResults
+findVersionInfo :: ApplicationVersionKey -> Rev -> Managed GlobalResults
 findVersionInfo keys grDaedalusCommit = do
   grApplicationVersion <- grabAppVersion grDaedalusCommit keys
   printf ("applicationVersion: "%d%"\n") grApplicationVersion
@@ -111,6 +112,7 @@ appVersionFromConfig key' cfg = case (ver Win64, ver Mac64) of
   (win, mac) | win /= mac -> fail "applicationVersions dont match"
   (Just val, Just _)      -> pure (applicationVersion $ update val)
   where
+    ver :: Arch -> Maybe Cardano.ConfigurationRoot
     ver a = HM.lookup (key' a) cfg
 
 ----------------------------------------------------------------------------

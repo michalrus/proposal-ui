@@ -19,7 +19,7 @@ extra-source-files:  CHANGELOG.md
 
 executable proposal-ui
   main-is:             Test.hs
-  ghc-options:         -threaded -Weverything -Wno-implicit-prelude -Wno-missing-import-lists -Wno-missing-local-signatures -Wno-missing-exported-signatures
+  ghc-options:         -threaded -Weverything -Wno-implicit-prelude -Wno-missing-local-signatures -Wno-missing-exported-signatures -Wno-unsafe
   other-modules:       PromptString
                      , Dialog1
                      , KeyToy
@@ -28,6 +28,16 @@ executable proposal-ui
                      , Utils
                      , Iohk.Types
                      , Arch
+                     , Types
+                     , Temp
+                     , Nix
+                     , Github
+                     , FileChooser
+                     , Cardano
+                     , ProposalUI
+                     , Buildkite.API
+                     , InstallerVersions
+                     , ProposalUI.Types
   other-extensions:    NamedFieldPuns
   build-depends:       base >=4.12 && <4.13
                      , aeson

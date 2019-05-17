@@ -13,7 +13,7 @@ data AppState = AppState
   , asDialogStack :: Dialog
   }
 
-data DialogReply = DialogReplyHalt AppState | DialogReplyContinue Dialog | forall a . DialogReplyLiftIO (IO Dialog)
+data DialogReply = DialogReplyHalt AppState | DialogReplyContinue Dialog | DialogReplyLiftIO (IO Dialog)
 
 data Dialog = Dialog
   { dRender :: AppState -> [ Widget Name ]

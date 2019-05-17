@@ -20,9 +20,9 @@ module Arch
   ) where
 
 import qualified Data.Aeson            as AE
-import           Data.Aeson
+import           Data.Aeson (FromJSON, ToJSON, (.:), (.=))
 import           Data.Text              (Text)
-import           GHC.Generics
+import           GHC.Generics (Generic)
 
 -- * Arch
 data Arch = Linux64 | Mac64 | Win64 deriving (Show, Read, Eq, Generic)
