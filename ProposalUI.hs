@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE LambdaCase #-}
 
 module ProposalUI (spawnProposalUI) where
 
@@ -7,10 +8,12 @@ import qualified Data.Text as T
 import Data.Maybe
 import Control.Monad.Managed
 import qualified System.Process             as P
-import Turtle
-import Control.Concurrent
+import           Turtle (FilePath, Shell, system, empty,single,die,format,(%),w,printf,s,fp, (<.>), testfile, readTextFile, join, (</>), encodeString, fromString)
 import Data.Time.Clock
 import Data.Time.Format
+import qualified Data.ByteString.Lazy.Char8 as L8
+import           Data.Aeson                 hiding (Options, encodeFile)
+import qualified Data.HashMap.Strict        as HM
 
 import Brick
 import qualified Graphics.Vty as V
@@ -27,15 +30,8 @@ import InstallerVersions
 import Github (Rev)
 import Utils
 
-data ProposalUIState = ProposalUIState
-  { psDaedalusRev :: Maybe String
-  , psCallback :: EventM Name DialogReply
-  , psMenuState :: L.List Name MenuChoices
-  , psInstallers :: Maybe InstallersResults
-  , psOutputDir :: Turtle.FilePath
-  }
-
-data MenuChoices = SetDaedalusRev | FindInstallers | SignInstallers deriving Show
+import ProposalUI.Types
+import RunCardano
 
 mkProposalUI :: ProposalUIState -> Dialog
 mkProposalUI state = Dialog { dRender = renderUI state, dHandleEvent = handleEvents state }
@@ -58,8 +54,11 @@ renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev} _astate = [ roo
     daedalusRev = case psDaedalusRev of
       Nothing -> str "No Daedalus Revision set"
       Just rev -> str $ "Daeadalus Revision: " <> rev
-    mkInstallers :: Maybe InstallersResults -> [ Widget Name ]
-    mkInstallers (Just InstallersResults{ciResults,globalResult}) = mkGlobalResult globalResult <> (map mkCiResult ciResults)
+    mkInstallers :: Maybe InstallerData -> [ Widget Name ]
+    mkInstallers (Just InstallerData{idResults = InstallersResults{ciResults,globalResult},idSHA256,idBlake}) =
+         mkGlobalResult globalResult
+      <> (map mkCiResult ciResults)
+      <> [ ((str . show) idSHA256), ((str . show) idBlake) ]
     mkInstallers Nothing = []
     mkCiResult :: CIResult -> Widget Name
     mkCiResult CIResult{ciResultLocalPath,ciResultUrl,ciResultDownloadUrl,ciResultBuildNumber,ciResultArch,ciResultSHA1Sum} = B.border $ vBox
@@ -82,6 +81,7 @@ renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev} _astate = [ roo
     renderRow _ SetDaedalusRev = str "Set Daedalus Revision"
     renderRow _ FindInstallers = str "Find Installers"
     renderRow _ SignInstallers = str "Sign installers with GPG"
+    renderRow _ S3Upload = str "Upload Installers to S3"
 
 configurationKeys :: Environment -> Arch -> T.Text
 configurationKeys Production Win64   = "mainnet_wallet_win64"
@@ -120,17 +120,155 @@ installerForEnv env = matchNet . installerNetwork . ciResultLocalPath
           Development -> True
           _           -> False
 
-findInstallers :: Turtle.FilePath -> Environment -> Rev -> IO InstallersResults
-findInstallers destDir env rev = do
+findInstallers :: BucketInfo -> Turtle.FilePath -> Environment -> Rev -> IO InstallerData
+findInstallers bucket destDir env rev = do
   let
     bkNum = Nothing
     avNum = Nothing
     instP = installerPredicates (installerForEnv env) (selectBuildNumberPredicate bkNum avNum)
-  with (getInstallersResults (configurationKeys env) instP rev (Just destDir)) pure
+    opts :: CommandOptions
+    opts = commandOptions "/tmp/work/path" "/cardano/src" "mainnet-dryrun-full" (biBucket bucket)
+    thing2 :: Managed InstallersResults
+    thing2 = getInstallersResults (configurationKeys env) instP rev (Just destDir)
+  installerResults <- with thing2 pure
+  let
+    thing :: Shell (InstallerHashes, InstallerHashes)
+    thing = do
+      sha256 <- getHashes sha256sum installerResults
+      hashes <- getHashes (cardanoHashInstaller opts) installerResults
+      pure (sha256, hashes)
+  (sha256', hashes') <- single thing
+  pure $ InstallerData installerResults sha256' hashes'
+
+-- | Apply a hashing command to all the installer files.
+getHashes :: MonadManaged m => (Turtle.FilePath -> m T.Text) -> InstallersResults -> m InstallerHashes
+getHashes getHash res = forResults res resultHash
+  where
+    resultHash arch r = getHash (ciResultLocalPath r) >>= check arch
+    check arch "" = die $ format ("Hash for "%w%" installer is empty") arch
+    check _ h     = pure h
+
+-- | Step 3. Hash installers and upload to S3
+updateProposalUploadS3 :: BucketInfo -> InstallerData -> Shell (ArchMap DownloadVersionInfo)
+updateProposalUploadS3 bucket InstallerData{idResults,idSHA256,idBlake} = do
+  printf ("*** Uploading installers to S3 bucket "%s%"\n") (biBucket bucket)
+  urls <- uploadInstallers bucket idResults idBlake
+  printf ("*** Uploading signatures to same S3 bucket.\n")
+  signatures <- uploadSignatures bucket idResults
+  let
+    dvis = makeDownloadVersionInfo idResults urls idBlake idSHA256 signatures
+  pure dvis
+
+createVersionJSON :: ArchMap DownloadVersionInfo -> Turtle.FilePath -> IO ()
+createVersionJSON dvis dir = do
+  let
+    cfgReleaseNotes = undefined
+  printf ("*** Writing "%fp%"\n") (versionFile dir)
+  liftIO $ writeVersionJSON (versionFile dir) dvis cfgReleaseNotes
+
+uploadInstallers :: BucketInfo -> InstallersResults -> InstallerHashes -> Shell (ArchMap T.Text)
+uploadInstallers bucket res hashes = runAWS' $ forResults res upload
+  where
+    upload arch ci = do
+      let hash = lookupArch arch hashes
+      printf ("***   "%s%"  "%fp%"\n") hash (ciResultLocalPath ci)
+      uploadHashedInstaller bucket (ciResultLocalPath ci) (globalResult res) hash
+
+-- | Perform an action on the CI result of each arch.
+forResults :: MonadIO io => InstallersResults -> (Arch -> CIResult -> io b) -> io (ArchMap b)
+forResults rs action = needCIResult rs >>= archMapEach action
+
+uploadResultSignature :: BucketInfo -> CIResult -> IO (Maybe T.Text)
+uploadResultSignature bucket res = liftIO $ maybeReadFile sigFile >>= \case
+  Just sig -> do
+    runAWS' $ uploadSignature bucket sigFile
+    pure $ Just sig
+  Nothing -> do
+    printf ("***   Signature file "%fp%" does not exist.\n") sigFile
+    pure Nothing
+  where
+    sigFile = ciResultLocalPath res <.> "asc"
+    maybeReadFile f = testfile f >>= \case
+      True -> Just <$> readTextFile f
+      False -> pure Nothing
+
+-- | Partition CI results by arch.
+groupResults :: InstallersResults -> ArchMap [CIResult]
+groupResults rs = filt <$> idArchMap
+  where filt arch = filter ((== arch) . ciResultArch) (ciResults rs)
+
+-- | Get a single CI result for each arch and crash if not found.
+needCIResult :: MonadIO io => InstallersResults -> io (ArchMap CIResult)
+needCIResult = archMapEach need . groupResults
+  where
+    need arch [] = die $ format ("The CI result for "%w%" is required but was not found.") arch
+    need _arch (r:_) = pure r
+
+-- | Slurp in previously created signatures.
+uploadSignatures :: BucketInfo -> InstallersResults -> Shell (ArchMap (Maybe T.Text))
+uploadSignatures bucket irs = fmap join . archMapFromList <$> mapM uploadSig (ciResults irs)
+  where
+    uploadSig res = do
+      sig <- liftIO $ uploadResultSignature bucket res
+      pure (ciResultArch res, sig)
+
+-- | Path to the version info json in the work directory.
+versionFile :: Turtle.FilePath -> Turtle.FilePath
+versionFile dir = dir </> "daedalus-latest-version.json"
+
+writeVersionJSON :: Turtle.FilePath -> ArchMap DownloadVersionInfo -> Maybe T.Text -> IO ()
+writeVersionJSON out dvis releaseNotes = L8.writeFile (encodeString out) (encode v)
+  where
+    v = downloadVersionInfoObject dvis releaseNotes
+
+-- | Adds two json objects together.
+mergeObjects :: Value -> Value -> Value
+mergeObjects (Object a) (Object b) = Object (a <> b)
+mergeObjects _ b                   = b
+
+-- | Splat version info to an aeson object.
+downloadVersionInfoObject :: ArchMap DownloadVersionInfo  -> Maybe T.Text -> Value
+downloadVersionInfoObject dvis releaseNotes = mergeObjects legacy newFormat
+  where
+    legacy :: Value
+    legacy = (Object . HM.fromList . concat . map (uncurry toObject) . archMapToList) dvis
+    newFormat :: Value
+    newFormat = toJSON (DownloadVersionJson dvis releaseNotes)
+    toObject :: Arch -> DownloadVersionInfo -> [ (T.Text, Value) ]
+    toObject arch DownloadVersionInfo{dviVersion,dviURL,dviHash,dviSignature,dviSHA256} = attrs
+      where
+        attrs :: [ (T.Text, Value) ]
+        attrs = [ (keyPrefix arch <> k, String v) | (k, v) <-
+                    [ (""         , dviVersion)
+                    , ("URL"      , dviURL)
+                    , ("Hash"     , dviHash)
+                    , ("SHA256"   , dviSHA256)
+                    , ("Signature", fromMaybe "" dviSignature)
+                    ] ]
+    keyPrefix Mac64   = "macos"
+    keyPrefix Win64   = "win64"
+    keyPrefix Linux64 = "linux"
+
+makeDownloadVersionInfo :: InstallersResults
+                        -> ArchMap T.Text         -- ^ Download URLS
+                        -> InstallerHashes      -- ^ Blake2b hashes
+                        -> InstallerHashes      -- ^ SHA256 hashes
+                        -> ArchMap (Maybe T.Text) -- ^ GPG Signatures
+                        -> ArchMap DownloadVersionInfo
+makeDownloadVersionInfo InstallersResults{globalResult} urls hashes sha256 sigs = archMap dvi
+  where
+    dvi a = DownloadVersionInfo
+      { dviVersion = grDaedalusVersion globalResult
+      , dviURL = lookupArch a urls
+      , dviHash = lookupArch a hashes
+      , dviSHA256 = lookupArch a sha256
+      , dviSignature = lookupArch a sigs
+      }
 
 handleEvents :: ProposalUIState -> AppState -> BrickEvent Name CustomEvent -> EventM Name DialogReply
 handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOutputDir} _astate event = do
   let
+    bucket = BucketInfo "bucket-name" "bucket-name.s3.amazonaws.com"
     isValidRevision :: String -> Bool
     isValidRevision = all isValidChar
     isValidChar char = ( (char >= 'a') && (char <= 'f') ) || ( (char >= '0') && (char <= '9') )
@@ -147,7 +285,7 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
             let
               act :: IO Dialog
               act = do
-                res <- findInstallers psOutputDir Production (T.pack $ fromJust psDaedalusRev)
+                res <- findInstallers bucket psOutputDir Production (T.pack $ fromJust psDaedalusRev)
                 let
                   state1 = pstate { psInstallers = Just res }
                   state2 = state1 { psMenuState = generateNewMenu state1 }
@@ -155,10 +293,16 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
             pure $ DialogReplyLiftIO act
           SignInstallers -> do
             pure $ DialogReplyLiftIO $ do
-              updateProposalSignInstallers (fromJust psInstallers) (Just "michael.bishop@iohk.io")
-              threadDelay 1000000
+              updateProposalSignInstallers (idResults $ fromJust psInstallers) (Just "michael.bishop@iohk.io")
               -- TODO, flag as signed, and give a popup saying success/fail
               pure $ mkProposalUI pstate
+          S3Upload -> do
+            pure $ DialogReplyLiftIO $ do
+              dvis <- single $ updateProposalUploadS3 bucket (fromJust psInstallers)
+              let
+                state1 = pstate { psDownloadVersionInfo = Just dvis }
+                state2 = state1 { psMenuState = generateNewMenu state1 }
+              pure $ mkProposalUI state2
         Nothing -> pure $ DialogReplyContinue $ mkProposalUI pstate -- nothing selected, do nothing
   case event of
     VtyEvent (V.EvKey (V.KChar 'q') []) -> do
@@ -178,7 +322,7 @@ spawnProposalUI callback = do
     yearMonthDay = formatTime defaultTimeLocale (iso8601DateFormat Nothing) now
     destDir = "proposal-cluster-" <> yearMonthDay
     state' :: ProposalUIState
-    state' = ProposalUIState (Just "639ff61007c98257278e34d2aa2809e851417d01") callback undefined Nothing (fromString destDir)
+    state' = ProposalUIState (Just "639ff61007c98257278e34d2aa2809e851417d01") callback undefined Nothing (fromString destDir) Nothing
     menu = generateNewMenu state'
     state = state' { psMenuState = menu }
   pure $ mkProposalUI state

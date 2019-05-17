@@ -37,11 +37,14 @@ executable proposal-ui
                      , brick
                      , bytestring
                      , cassava
+                     , cborg
                      , containers
                      , cryptonite
+                     , deepseq
                      , directory
                      , errors
                      , exceptions
+                     , foldl
                      , hourglass
                      , http-client
                      , http-client-tls

@@ -7,6 +7,7 @@
 {-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving  #-}
+{-# LANGUAGE NamedFieldPuns #-}
 
 module UpdateLogic
   ( getInstallersResults
@@ -27,6 +28,7 @@ module UpdateLogic
   , StatusContext(..)
   , bucketRegion
   , runAWS'
+  , BucketInfo(..)
   ) where
 
 import           Appveyor                         (AppveyorArtifact (AppveyorArtifact),
@@ -50,7 +52,6 @@ import           Control.Monad                    (forM_, guard, mapM_, when,
                                                    (<=<))
 import           Control.Monad.IO.Class           (liftIO)
 import           Control.Monad.Trans.Resource     (runResourceT)
-import Control.Monad.Managed (MonadManaged)
 import           Data.Aeson                       (FromJSON, ToJSON)
 import qualified Data.ByteString.Lazy             as LBS
 import qualified Data.HashMap.Strict              as HashMap
@@ -63,7 +64,6 @@ import qualified Data.Text.IO                     as T
 import           Filesystem.Path                  (FilePath, filename, (</>))
 import qualified Filesystem.Path.CurrentOS        as FP
 import           GHC.Generics                     (Generic)
-import           GHC.Stack                        (HasCallStack)
 import           Github                           (Rev, Status, context,
                                                    fetchGithubStatus, statuses,
                                                    targetUrl)
@@ -90,7 +90,7 @@ import           System.Console.ANSI              (Color (Green),
 import           System.IO.Error                  (ioeGetErrorString)
 import           Turtle                           (MonadIO, d, die, format, fp,
                                                    makeFormat, printf, s, void,
-                                                   w, (%))
+                                                   w, (%), Managed)
 
 import           InstallerVersions                (GlobalResults (GlobalResults, grApplicationVersion, grCardanoCommit, grCardanoVersion, grDaedalusCommit, grDaedalusVersion),
                                                    InstallerNetwork (InstallerMainnet, InstallerStaging, InstallerTestnet),
@@ -99,10 +99,14 @@ import           InstallerVersions                (GlobalResults (GlobalResults,
 import           Iohk.Types                            (ApplicationVersion,
                                                    ApplicationVersionKey,
                                                    Arch (Linux64, Mac64, Win64),
-                                                   NixopsConfig (NixopsConfig, cInstallerURLBase),
                                                    formatArch)
 import           Utils                            (fetchCachedUrl,
                                                    fetchCachedUrlWithSHA1)
+
+data BucketInfo = BucketInfo
+  { biBucket :: Text
+  , biURLBase :: Text
+  }
 
 data CIResult = CIResult
   { ciResultSystem      :: CISystem
@@ -164,9 +168,8 @@ loadBuildkiteToken = try (T.readFile buildkiteTokenFile) >>= \case
              "Exiting!" :: Text
     st = makeFormat T.pack
 
-cdnLink :: HasCallStack => NixopsConfig -> ObjectKey -> Text
-cdnLink NixopsConfig{cInstallerURLBase=Nothing, ..} _ = error "installer-url-base is required in the configuration YAML file, but was not specified"
-cdnLink NixopsConfig{cInstallerURLBase=Just cInstallerURLBase, ..} (ObjectKey key) = mconcat [ "https://", cInstallerURLBase, "/", key ]
+cdnLink :: Text -> ObjectKey -> Text
+cdnLink cInstallerURLBase (ObjectKey key) = mconcat [ "https://", cInstallerURLBase, "/", key ]
 
 buildkiteTokenFile = "static/buildkite_token" :: String
 
@@ -180,7 +183,7 @@ realFindInstallers instP daedalusRev destDir = do
       (Right . concat) <$> mapM findStatus st
     Left err -> pure $ Left err
 
-getInstallersResults :: MonadManaged m => ApplicationVersionKey -> InstallerPredicate -> Rev -> Maybe FilePath -> m InstallersResults
+getInstallersResults :: ApplicationVersionKey -> InstallerPredicate -> Rev -> Maybe FilePath -> Managed InstallersResults
 getInstallersResults keys instP daedalusRev destDir = do
   eciResults <- liftIO $ realFindInstallers instP daedalusRev destDir
   case eciResults of
@@ -363,13 +366,13 @@ githubWikiRecord InstallersResults{..} = T.intercalate " | " cols <> "\n"
 
     mdLink = format ("["%s%"]("%s%")")
 
-updateVersionJson :: NixopsConfig -> Text -> LBS.ByteString -> IO Text
-updateVersionJson cfg bucket json = runAWS' . withinBucketRegion bucketName $ \_ -> do
+updateVersionJson :: BucketInfo -> LBS.ByteString -> IO Text
+updateVersionJson BucketInfo{biURLBase,biBucket} json = runAWS' . withinBucketRegion bucketName $ \_ -> do
   uploadFile json key
-  pure $ cdnLink cfg key
+  pure $ cdnLink biURLBase key
   where
     key = ObjectKey "daedalus-latest-version.json"
-    bucketName = BucketName bucket
+    bucketName = BucketName biBucket
     uploadFile :: LBS.ByteString -> ObjectKey -> AWS ()
     uploadFile body remoteKey = void . send $
       makePublic $ putObject bucketName remoteKey (toBody body)
@@ -391,17 +394,17 @@ withinBucketRegion bucketName action = do
 
 type AWSMeta = HashMap.HashMap Text Text
 
-uploadHashedInstaller :: NixopsConfig -> Text -> FilePath -> GlobalResults -> Text -> AWS Text
-uploadHashedInstaller cfg bucketName localPath GlobalResults{..} hash =
+uploadHashedInstaller :: BucketInfo -> FilePath -> GlobalResults -> Text -> AWS Text
+uploadHashedInstaller BucketInfo{biURLBase,biBucket} localPath GlobalResults{..} hash =
   withinBucketRegion bucketName' $ \_ -> do
     uploadOneFile bucketName' localPath (ObjectKey hash) meta
     copyObject' hashedPath key
-    pure $ cdnLink cfg key
+    pure $ cdnLink biURLBase key
 
   where
     key = simpleKey localPath
-    bucketName' = BucketName bucketName
-    hashedPath = bucketName <> "/" <> hash
+    bucketName' = BucketName biBucket
+    hashedPath = biBucket <> "/" <> hash
 
     meta = HashMap.fromList
       [ ("daedalus-revision", grDaedalusCommit)
@@ -412,10 +415,10 @@ uploadHashedInstaller cfg bucketName localPath GlobalResults{..} hash =
     copyObject' :: Text -> ObjectKey -> AWS ()
     copyObject' source dest = void . send $ Lens.set coACL (Just OPublicRead) $ copyObject bucketName' source dest
 
-uploadSignature :: Text -> FilePath -> AWS ()
-uploadSignature bucket localPath = withinBucketRegion bucketName . const $
+uploadSignature :: BucketInfo -> FilePath -> AWS ()
+uploadSignature BucketInfo{biBucket} localPath = withinBucketRegion bucketName . const $
   uploadOneFile bucketName localPath (simpleKey localPath) mempty
-  where bucketName = BucketName bucket
+  where bucketName = BucketName biBucket
 
 -- | S3 object key is just the base name of the filepath.
 simpleKey :: FilePath -> ObjectKey
