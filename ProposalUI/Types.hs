@@ -41,7 +41,7 @@ instance ToJSON DownloadVersionJson where
 
 type InstallerHashes = ArchMap Text
 
-data MenuChoices = SetDaedalusRev | FindInstallers | SignInstallers | S3Upload deriving Show
+data MenuChoices = SetDaedalusRev | FindInstallers | SignInstallers | S3Upload | UpdateVersionJSON deriving Show
 
 data ProposalUIState = ProposalUIState
   { psDaedalusRev :: Maybe String
@@ -54,6 +54,4 @@ data ProposalUIState = ProposalUIState
 
 data InstallerData = InstallerData
   { idResults :: InstallersResults
-  , idSHA256 :: InstallerHashes
-  , idBlake :: InstallerHashes
   }

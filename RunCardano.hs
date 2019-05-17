@@ -9,6 +9,7 @@ import Control.Monad (forM_)
 import qualified Data.Text as T
 import Data.Word (Word16)
 import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString as BS
 
 import Utils (tt)
 import Temp
@@ -44,16 +45,6 @@ commandOptions cmdWorkPath cardanoSource cmdCardanoConfigKey cmdUpdateBucket
 ----------------------------------------------------------------------------
 -- Hashing
 
--- | Run cardano-auxx "hash-installer" command on a file and capture
--- its output.
-cardanoHashInstaller :: CommandOptions -> FilePath -> Shell Text
-cardanoHashInstaller opts installer = do
-  fileData <- liftIO $ BSL.readFile $ encodeString installer
-  let h = installerHash fileData
-  pure $ T.pack $ show h
-  where
-    cmd = format ("hash-installer "%fp)
-    hash = prefix (text "Hash" *> star anyChar *> text " is " *> hash256Hex)
 
 -- | Matches 64 hex digits, which is a 256 bit value
 hash256Hex :: Pattern Text

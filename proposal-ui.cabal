@@ -68,3 +68,15 @@ executable proposal-ui
                      , yaml
   -- hs-source-dirs:
   default-language:    Haskell2010
+
+test-suite tests
+  main-is: TestSuite.hs
+  default-language:    Haskell2010
+  build-depends:       base
+                     , bytestring
+                     , cryptonite
+                     , memory
+                     , cborg
+                     , deepseq
+                     , base16-bytestring
+  type:                exitcode-stdio-1.0

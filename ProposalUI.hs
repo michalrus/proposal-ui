@@ -8,7 +8,7 @@ import qualified Data.Text as T
 import Data.Maybe
 import Control.Monad.Managed
 import qualified System.Process             as P
-import           Turtle (FilePath, Shell, system, empty,single,die,format,(%),w,printf,s,fp, (<.>), testfile, readTextFile, join, (</>), encodeString, fromString)
+import           Turtle (FilePath, Shell, system, empty,single,die,format,(%),w,printf,s,fp, (<.>), testfile, readTextFile, join, fromString)
 import Data.Time.Clock
 import Data.Time.Format
 import qualified Data.ByteString.Lazy.Char8 as L8
@@ -37,14 +37,16 @@ mkProposalUI :: ProposalUIState -> Dialog
 mkProposalUI state = Dialog { dRender = renderUI state, dHandleEvent = handleEvents state }
 
 generateNewMenu :: ProposalUIState -> L.List Name MenuChoices
-generateNewMenu ProposalUIState{psDaedalusRev,psInstallers} = L.list Menu1 (V.fromList thelist) 1
+generateNewMenu ProposalUIState{psDaedalusRev,psInstallers,psDownloadVersionInfo} = L.list Menu1 (V.fromList thelist) 1
   where
-    thelist = [ SetDaedalusRev ] <> maybeFindInstallers <> maybeSign
+    thelist = [ SetDaedalusRev ] <> maybeFindInstallers <> maybeSign <> maybeUpload <> maybeSetVersion
     maybeFindInstallers = if (isJust psDaedalusRev) then [ FindInstallers ] else []
     maybeSign = if (isJust psInstallers) then [ SignInstallers ] else []
+    maybeUpload = if (isJust psInstallers) then [ S3Upload ] else []
+    maybeSetVersion = if (isJust psDownloadVersionInfo) then [ UpdateVersionJSON ] else []
 
 renderUI :: ProposalUIState -> AppState -> [ Widget Name ]
-renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev} _astate = [ root ]
+renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev,psDownloadVersionInfo} _astate = [ root ]
   where
     root :: Widget Name
     root = vBox [ B.borderWithLabel (str "Current State") status, menu ]
@@ -55,15 +57,14 @@ renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev} _astate = [ roo
       Nothing -> str "No Daedalus Revision set"
       Just rev -> str $ "Daeadalus Revision: " <> rev
     mkInstallers :: Maybe InstallerData -> [ Widget Name ]
-    mkInstallers (Just InstallerData{idResults = InstallersResults{ciResults,globalResult},idSHA256,idBlake}) =
+    mkInstallers (Just InstallerData{idResults = InstallersResults{ciResults,globalResult}}) =
          mkGlobalResult globalResult
-      <> (map mkCiResult ciResults)
-      <> [ ((str . show) idSHA256), ((str . show) idBlake) ]
+      <> (map mkCiResult ciResults) <> [ strWrap $ show psDownloadVersionInfo ]
     mkInstallers Nothing = []
-    mkCiResult :: CIResult -> Widget Name
-    mkCiResult CIResult{ciResultLocalPath,ciResultUrl,ciResultDownloadUrl,ciResultBuildNumber,ciResultArch,ciResultSHA1Sum} = B.border $ vBox
+    mkCiResult :: CIResult2 -> Widget Name
+    mkCiResult CIFetchedResult{cifLocal,cifResult=CIResult{ciResultUrl,ciResultDownloadUrl,ciResultBuildNumber,ciResultArch,ciResultSHA1Sum}} = B.border $ vBox
       [ str $ "Arch: " <> show ciResultArch
-      , str $ "Local Path: " <> show ciResultLocalPath
+      , str $ "Local Path: " <> show cifLocal
       , txt $ "URL: " <> ciResultUrl
       , txt $ "Download URL: " <> ciResultDownloadUrl
       , str $ "Build#: " <> show ciResultBuildNumber
@@ -82,6 +83,7 @@ renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev} _astate = [ roo
     renderRow _ FindInstallers = str "Find Installers"
     renderRow _ SignInstallers = str "Sign installers with GPG"
     renderRow _ S3Upload = str "Upload Installers to S3"
+    renderRow _ UpdateVersionJSON = str "Set daedalus-latest-version.json"
 
 configurationKeys :: Environment -> Arch -> T.Text
 configurationKeys Production Win64   = "mainnet_wallet_win64"
@@ -100,7 +102,10 @@ configurationKeys env' _ = error $ "Application versions not used in '" <> show 
 -- upload S3 step.
 updateProposalSignInstallers :: InstallersResults -> Maybe T.Text -> IO ()
 updateProposalSignInstallers params userId = do
-  mapM_ signInstaller (map ciResultLocalPath . ciResults $ params)
+  let
+    things :: [Turtle.FilePath]
+    things = map (cifLocal) (ciResults params)
+  mapM_ signInstaller things
   where
     -- using system instead of procs so that tty is available to gpg
     signInstaller f = system (P.proc "gpg2" $ map T.unpack $ gpgArgs f) empty
@@ -112,7 +117,7 @@ updateProposalSignInstallers params userId = do
 -- | Checks if an installer from a CI result matches the environment
 -- that iohk-ops is running under.
 installerForEnv :: Environment -> CIResult -> Bool
-installerForEnv env = matchNet . installerNetwork . ciResultLocalPath
+installerForEnv env = matchNet . installerNetwork . ciResultFilename
   where matchNet n = case env of
           Production  -> n == Just InstallerMainnet
           Staging     -> n == Just InstallerStaging
@@ -120,65 +125,57 @@ installerForEnv env = matchNet . installerNetwork . ciResultLocalPath
           Development -> True
           _           -> False
 
-findInstallers :: BucketInfo -> Turtle.FilePath -> Environment -> Rev -> IO InstallerData
-findInstallers bucket destDir env rev = do
+findInstallers :: Turtle.FilePath -> Environment -> Rev -> IO InstallerData
+findInstallers destDir env rev = do
   let
     bkNum = Nothing
     avNum = Nothing
+    instP :: InstallerPredicate
     instP = installerPredicates (installerForEnv env) (selectBuildNumberPredicate bkNum avNum)
-    opts :: CommandOptions
-    opts = commandOptions "/tmp/work/path" "/cardano/src" "mainnet-dryrun-full" (biBucket bucket)
     thing2 :: Managed InstallersResults
-    thing2 = getInstallersResults (configurationKeys env) instP rev (Just destDir)
+    thing2 = getInstallersResults (configurationKeys env) instP rev destDir
   installerResults <- with thing2 pure
-  let
-    thing :: Shell (InstallerHashes, InstallerHashes)
-    thing = do
-      sha256 <- getHashes sha256sum installerResults
-      hashes <- getHashes (cardanoHashInstaller opts) installerResults
-      pure (sha256, hashes)
-  (sha256', hashes') <- single thing
-  pure $ InstallerData installerResults sha256' hashes'
-
--- | Apply a hashing command to all the installer files.
-getHashes :: MonadManaged m => (Turtle.FilePath -> m T.Text) -> InstallersResults -> m InstallerHashes
-getHashes getHash res = forResults res resultHash
-  where
-    resultHash arch r = getHash (ciResultLocalPath r) >>= check arch
-    check arch "" = die $ format ("Hash for "%w%" installer is empty") arch
-    check _ h     = pure h
+  pure $ InstallerData installerResults
 
 -- | Step 3. Hash installers and upload to S3
 updateProposalUploadS3 :: BucketInfo -> InstallerData -> Shell (ArchMap DownloadVersionInfo)
-updateProposalUploadS3 bucket InstallerData{idResults,idSHA256,idBlake} = do
+updateProposalUploadS3 bucket InstallerData{idResults} = do
   printf ("*** Uploading installers to S3 bucket "%s%"\n") (biBucket bucket)
-  urls <- uploadInstallers bucket idResults idBlake
+  urls <- uploadInstallers bucket idResults
   printf ("*** Uploading signatures to same S3 bucket.\n")
   signatures <- uploadSignatures bucket idResults
+  resultMap <- needCIResult idResults
   let
-    dvis = makeDownloadVersionInfo idResults urls idBlake idSHA256 signatures
+    dvis = makeDownloadVersionInfo idResults resultMap urls signatures
   pure dvis
 
-createVersionJSON :: ArchMap DownloadVersionInfo -> Turtle.FilePath -> IO ()
-createVersionJSON dvis dir = do
+updateVersionJSON :: BucketInfo -> ArchMap DownloadVersionInfo -> IO T.Text
+updateVersionJSON bucket dvis = do
   let
-    cfgReleaseNotes = undefined
-  printf ("*** Writing "%fp%"\n") (versionFile dir)
-  liftIO $ writeVersionJSON (versionFile dir) dvis cfgReleaseNotes
+    blob = createVersionJSON dvis
+  updateVersionJson bucket blob
 
-uploadInstallers :: BucketInfo -> InstallersResults -> InstallerHashes -> Shell (ArchMap T.Text)
-uploadInstallers bucket res hashes = runAWS' $ forResults res upload
+createVersionJSON :: ArchMap DownloadVersionInfo -> L8.ByteString
+createVersionJSON dvis = do
+  let
+    cfgReleaseNotes = Nothing
+    v = downloadVersionInfoObject dvis cfgReleaseNotes
+  encode v
+
+uploadInstallers :: BucketInfo -> InstallersResults -> Shell (ArchMap T.Text)
+uploadInstallers bucket res = runAWS' $ forResults res upload
   where
-    upload arch ci = do
-      let hash = lookupArch arch hashes
-      printf ("***   "%s%"  "%fp%"\n") hash (ciResultLocalPath ci)
-      uploadHashedInstaller bucket (ciResultLocalPath ci) (globalResult res) hash
+    upload _arch ci = do
+      let
+        hash = T.pack $ show $ cifBlakeCbor ci
+      printf ("***   "%s%"  "%fp%"\n") hash (cifLocal ci)
+      uploadHashedInstaller bucket (cifLocal ci) (globalResult res) hash
 
 -- | Perform an action on the CI result of each arch.
-forResults :: MonadIO io => InstallersResults -> (Arch -> CIResult -> io b) -> io (ArchMap b)
+forResults :: MonadIO io => InstallersResults -> (Arch -> CIResult2 -> io b) -> io (ArchMap b)
 forResults rs action = needCIResult rs >>= archMapEach action
 
-uploadResultSignature :: BucketInfo -> CIResult -> IO (Maybe T.Text)
+uploadResultSignature :: BucketInfo -> CIResult2 -> IO (Maybe T.Text)
 uploadResultSignature bucket res = liftIO $ maybeReadFile sigFile >>= \case
   Just sig -> do
     runAWS' $ uploadSignature bucket sigFile
@@ -187,18 +184,18 @@ uploadResultSignature bucket res = liftIO $ maybeReadFile sigFile >>= \case
     printf ("***   Signature file "%fp%" does not exist.\n") sigFile
     pure Nothing
   where
-    sigFile = ciResultLocalPath res <.> "asc"
+    sigFile = cifLocal res <.> "asc"
     maybeReadFile f = testfile f >>= \case
       True -> Just <$> readTextFile f
       False -> pure Nothing
 
 -- | Partition CI results by arch.
-groupResults :: InstallersResults -> ArchMap [CIResult]
+groupResults :: InstallersResults -> ArchMap [CIResult2]
 groupResults rs = filt <$> idArchMap
-  where filt arch = filter ((== arch) . ciResultArch) (ciResults rs)
+  where filt arch = filter ((== arch) . ciResultArch . cifResult) (ciResults rs)
 
 -- | Get a single CI result for each arch and crash if not found.
-needCIResult :: MonadIO io => InstallersResults -> io (ArchMap CIResult)
+needCIResult :: MonadIO io => InstallersResults -> io (ArchMap CIResult2)
 needCIResult = archMapEach need . groupResults
   where
     need arch [] = die $ format ("The CI result for "%w%" is required but was not found.") arch
@@ -210,16 +207,7 @@ uploadSignatures bucket irs = fmap join . archMapFromList <$> mapM uploadSig (ci
   where
     uploadSig res = do
       sig <- liftIO $ uploadResultSignature bucket res
-      pure (ciResultArch res, sig)
-
--- | Path to the version info json in the work directory.
-versionFile :: Turtle.FilePath -> Turtle.FilePath
-versionFile dir = dir </> "daedalus-latest-version.json"
-
-writeVersionJSON :: Turtle.FilePath -> ArchMap DownloadVersionInfo -> Maybe T.Text -> IO ()
-writeVersionJSON out dvis releaseNotes = L8.writeFile (encodeString out) (encode v)
-  where
-    v = downloadVersionInfoObject dvis releaseNotes
+      pure (ciResultArch $ cifResult res, sig)
 
 -- | Adds two json objects together.
 mergeObjects :: Value -> Value -> Value
@@ -250,25 +238,25 @@ downloadVersionInfoObject dvis releaseNotes = mergeObjects legacy newFormat
     keyPrefix Linux64 = "linux"
 
 makeDownloadVersionInfo :: InstallersResults
+                        -> ArchMap CIResult2
                         -> ArchMap T.Text         -- ^ Download URLS
-                        -> InstallerHashes      -- ^ Blake2b hashes
-                        -> InstallerHashes      -- ^ SHA256 hashes
                         -> ArchMap (Maybe T.Text) -- ^ GPG Signatures
                         -> ArchMap DownloadVersionInfo
-makeDownloadVersionInfo InstallersResults{globalResult} urls hashes sha256 sigs = archMap dvi
+makeDownloadVersionInfo InstallersResults{globalResult} resultMap urls sigs = archMap dvi
   where
+    dvi :: Arch -> DownloadVersionInfo
     dvi a = DownloadVersionInfo
       { dviVersion = grDaedalusVersion globalResult
       , dviURL = lookupArch a urls
-      , dviHash = lookupArch a hashes
-      , dviSHA256 = lookupArch a sha256
+      , dviHash = T.pack $ show $ cifBlakeCbor $ lookupArch a resultMap
+      , dviSHA256 = T.pack $ show $ cifSha256 $ lookupArch a resultMap
       , dviSignature = lookupArch a sigs
       }
 
 handleEvents :: ProposalUIState -> AppState -> BrickEvent Name CustomEvent -> EventM Name DialogReply
-handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOutputDir} _astate event = do
+handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOutputDir,psDownloadVersionInfo} _astate event = do
   let
-    bucket = BucketInfo "bucket-name" "bucket-name.s3.amazonaws.com"
+    bucket = BucketInfo "proposal-ui-test" "proposal-ui-test.s3.amazonaws.com"
     isValidRevision :: String -> Bool
     isValidRevision = all isValidChar
     isValidChar char = ( (char >= 'a') && (char <= 'f') ) || ( (char >= '0') && (char <= '9') )
@@ -285,7 +273,7 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
             let
               act :: IO Dialog
               act = do
-                res <- findInstallers bucket psOutputDir Production (T.pack $ fromJust psDaedalusRev)
+                res <- findInstallers psOutputDir Production (T.pack $ fromJust psDaedalusRev)
                 let
                   state1 = pstate { psInstallers = Just res }
                   state2 = state1 { psMenuState = generateNewMenu state1 }
@@ -303,6 +291,9 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
                 state1 = pstate { psDownloadVersionInfo = Just dvis }
                 state2 = state1 { psMenuState = generateNewMenu state1 }
               pure $ mkProposalUI state2
+          UpdateVersionJSON -> do
+            liftIO $ updateVersionJSON bucket (fromJust psDownloadVersionInfo)
+            pure $ DialogReplyContinue $ mkProposalUI pstate
         Nothing -> pure $ DialogReplyContinue $ mkProposalUI pstate -- nothing selected, do nothing
   case event of
     VtyEvent (V.EvKey (V.KChar 'q') []) -> do
