@@ -45,7 +45,6 @@ import           Control.Monad                    (forM_, guard)
 import           Control.Monad.IO.Class           (liftIO)
 import Crypto.Hash (Digest, Blake2b_256, hash, SHA256)
 import           Control.Monad.Trans.Resource     (runResourceT)
-import           Data.Aeson                       (FromJSON, ToJSON)
 import qualified Data.ByteString.Lazy             as LBS
 import qualified Data.ByteString                  as BS
 import qualified Data.HashMap.Strict              as HashMap
@@ -54,7 +53,6 @@ import           Data.Monoid                      ((<>))
 import           Data.Text                        (Text)
 import qualified Data.Text                        as T
 import qualified Data.Text.IO                     as T
-import           Filesystem.Path                  (FilePath, filename, (</>))
 import qualified Filesystem.Path.CurrentOS        as FP
 import           GHC.Generics                     (Generic)
 import           Github                           (Rev, Status, context,
@@ -73,7 +71,6 @@ import           Network.AWS.S3.Types             (BucketName (BucketName),
                                                    ObjectKey (ObjectKey),
                                                    constraintRegion)
 import           Network.URI                      (parseURI, uriPath)
-import           Prelude                          hiding (FilePath)
 import           Safe                             (headMay, lastMay, readMay)
 import           System.Console.ANSI              (Color (Green),
                                                    ColorIntensity (Dull),
@@ -81,8 +78,8 @@ import           System.Console.ANSI              (Color (Green),
                                                    SGR (Reset, SetColor),
                                                    setSGR)
 import           System.IO.Error                  (ioeGetErrorString)
-import           Turtle                           (MonadIO, d, die, format, fp,
-                                                   makeFormat, printf, s, void,
+import           Turtle                           (MonadIO, d, die, format, fp, (</>),
+                                                   makeFormat, printf, s, void, FilePath, filename,
                                                    w, (%), Managed)
 
 import           InstallerVersions                (GlobalResults (GlobalResults, grApplicationVersion, grCardanoCommit, grCardanoVersion, grDaedalusCommit, grDaedalusVersion),
@@ -108,12 +105,12 @@ data CIResult = CIResult
   , ciResultBuildNumber :: Int
   , ciResultArch        :: Arch
   , ciResultSHA1Sum     :: Maybe Text
-  , ciResultFilename    :: FilePath
+  , ciResultFilename    :: Turtle.FilePath
   } deriving (Show, Generic)
 
 data CIResult2 = CIFetchedResult
   { cifResult :: CIResult
-  , cifLocal :: FilePath
+  , cifLocal :: Turtle.FilePath
   , cifBlakeCbor :: Digest Blake2b_256
   , cifSha256 :: Digest SHA256
   } deriving Show
@@ -125,10 +122,6 @@ data InstallersResults = InstallersResults
   , globalResult :: GlobalResults
   } deriving (Show, Generic)
 
-instance FromJSON CIResult
-instance FromJSON CISystem
-instance ToJSON CIResult
-instance ToJSON CISystem
 
 -- | Allow selection of which CI artifacts to download.
 type InstallerPredicate = CIResult -> Bool
@@ -171,7 +164,7 @@ cdnLink cInstallerURLBase (ObjectKey key) = mconcat [ "https://", cInstallerURLB
 
 buildkiteTokenFile = "static/buildkite_token" :: String
 
-realFindInstallers :: InstallerPredicate -> Rev -> FilePath -> IO (Either Text [CIResult2])
+realFindInstallers :: InstallerPredicate -> Rev -> Turtle.FilePath -> IO (Either Text [CIResult2])
 realFindInstallers instP daedalusRev destDir = do
   eBuildkiteToken <- liftIO $ loadBuildkiteToken
   case eBuildkiteToken of
@@ -186,7 +179,7 @@ realFindInstallers instP daedalusRev destDir = do
       (Right . concat) <$> mapM findStatus st
     Left err -> pure $ Left err
 
-getInstallersResults :: ApplicationVersionKey -> InstallerPredicate -> Rev -> FilePath -> Managed InstallersResults
+getInstallersResults :: ApplicationVersionKey -> InstallerPredicate -> Rev -> Turtle.FilePath -> Managed InstallersResults
 getInstallersResults keys instP daedalusRev destDir = do
   eciResults <- liftIO $ realFindInstallers instP daedalusRev destDir
   case eciResults of
@@ -199,7 +192,7 @@ getInstallersResults keys instP daedalusRev destDir = do
       liftIO $ validateCIResultCount innerResults
       pure $ InstallersResults ciResults globalResult
 
-handleCIResults :: InstallerPredicate -> FilePath -> Either Text [CIResult] -> IO [CIResult2]
+handleCIResults :: InstallerPredicate -> Turtle.FilePath -> Either Text [CIResult] -> IO [CIResult2]
 handleCIResults instP destDir (Right rs) = do
   let rs' = filter instP rs
   fetchCIResults destDir rs'
@@ -272,23 +265,26 @@ findInstallersAppVeyor url user project version = do
       }
 
 -- | Download artifacts into the nix store.
-fetchCIResults :: FilePath -> [CIResult] -> IO [CIResult2]
+fetchCIResults :: Turtle.FilePath -> [CIResult] -> IO [CIResult2]
 fetchCIResults destDir = mapM fetchResult
   where
     fetchResult :: CIResult -> IO CIResult2
     fetchResult r@CIResult{..} = do
       let
         localDest = destDir </> ciResultFilename
-        fetchCached :: Text -> FilePath -> FilePath -> IO ()
+        fetchCached :: Text -> Turtle.FilePath -> Turtle.FilePath -> IO ()
         fetchCached = case ciResultSHA1Sum of
                             Just sha1 -> fetchCachedUrlWithSHA1 sha1
                             Nothing   -> fetchCachedUrl
       fetchCached ciResultDownloadUrl (filename ciResultFilename) localDest
+      printf ("reading " % fp % " into ram...\n") localDest
       rawData <- BS.readFile $ FP.encodeString localDest
+      printf "hasing it twice...\n"
       let
         blakecbor = installerHash rawData
         sha256 :: Digest SHA256
         sha256 = hash rawData
+      printf "done\n"
       pure $ CIFetchedResult r localDest blakecbor sha256
 
 forInstallers :: Text -> (a -> Bool) -> [a] -> (a -> IO CIResult) -> IO (Either Text [CIResult])
@@ -430,7 +426,7 @@ withinBucketRegion bucketName action = do
 
 type AWSMeta = HashMap.HashMap Text Text
 
-uploadHashedInstaller :: BucketInfo -> FilePath -> GlobalResults -> (Text,Text) -> AWS Text
+uploadHashedInstaller :: BucketInfo -> Turtle.FilePath -> GlobalResults -> (Text,Text) -> AWS Text
 uploadHashedInstaller BucketInfo{biURLBase,biBucket} localPath GlobalResults{grDaedalusCommit,grCardanoCommit,grApplicationVersion} (hash', filename') = do
   let
     bucket = BucketName biBucket
@@ -451,16 +447,16 @@ uploadHashedInstaller BucketInfo{biURLBase,biBucket} localPath GlobalResults{grD
     copyObject' :: Text -> ObjectKey -> AWS ()
     copyObject' source dest = void . send $ Lens.set coACL (Just OPublicRead) $ copyObject (BucketName biBucket) source dest
 
-uploadSignature :: BucketInfo -> FilePath -> AWS ()
+uploadSignature :: BucketInfo -> Turtle.FilePath -> AWS ()
 uploadSignature BucketInfo{biBucket} localPath = withinBucketRegion bucketName . const $
   uploadOneFile bucketName localPath (simpleKey localPath) mempty
   where bucketName = BucketName biBucket
 
 -- | S3 object key is just the base name of the filepath.
-simpleKey :: FilePath -> ObjectKey
+simpleKey :: Turtle.FilePath -> ObjectKey
 simpleKey = ObjectKey . format fp . FP.filename
 
-uploadOneFile :: BucketName -> FilePath -> ObjectKey -> AWSMeta -> AWS ()
+uploadOneFile :: BucketName -> Turtle.FilePath -> ObjectKey -> AWSMeta -> AWS ()
 uploadOneFile bucket localPath remoteKey meta = do
   bdy <- chunkedFile defaultChunkSize (FP.encodeString localPath)
   void . send $ makePublic $ Lens.set poMetadata meta $ putObject bucket remoteKey bdy

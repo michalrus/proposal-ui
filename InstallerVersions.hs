@@ -1,7 +1,5 @@
-{-# LANGUAGE DeriveGeneric      #-}
 {-# LANGUAGE OverloadedStrings  #-}
-{-# LANGUAGE RecordWildCards    #-}
-{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE NamedFieldPuns     #-}
 
 module InstallerVersions
   ( GlobalResults(..)
@@ -10,27 +8,20 @@ module InstallerVersions
   , installerNetwork
   ) where
 
-
-import           Prelude                    hiding (FilePath)
-
-import           Control.Lens               hiding (strict)
-import           Data.Aeson                 (FromJSON, ToJSON)
-import           Data.Aeson.Lens
+import           Control.Lens               ((^?!))
+import           Data.Aeson.Lens            (key, _String)
 import qualified Data.ByteString.Lazy.Char8 as S8
 import qualified Data.HashMap.Strict        as HM
 import           Data.Text                  (Text)
 import qualified Data.Text                  as T
 import qualified Data.Yaml                  as Y
 import qualified Filesystem.Path.CurrentOS  as FP
-import           GHC.Generics               (Generic)
-import           Turtle
-import Control.Monad.Managed (MonadManaged)
+import           Turtle                     (FilePath, Managed, printf,d, liftIO, (%),s,format, (</>), filename)
 
 import           Cardano                    (ConfigurationYaml,
                                              applicationVersion, update, ConfigurationRoot)
 import           Github                     (Rev)
 import           Nix                        (nixBuildExpr, nixEvalExpr)
-import           Iohk.Types
 import           Utils                      (tt)
 import Arch (ApplicationVersionKey, Arch(Win64, Mac64))
 
@@ -40,10 +31,8 @@ data GlobalResults = GlobalResults {
     , grApplicationVersion :: Int
     , grCardanoVersion     :: Text
     , grDaedalusVersion    :: Text
-  } deriving (Show, Generic)
+  } deriving (Show)
 
-instance FromJSON GlobalResults
-instance ToJSON GlobalResults
 
 findVersionInfo :: ApplicationVersionKey -> Rev -> Managed GlobalResults
 findVersionInfo keys grDaedalusCommit = do
@@ -55,7 +44,7 @@ findVersionInfo keys grDaedalusCommit = do
   printf ("Daedalus version: "%s%"\n") grDaedalusVersion
   grCardanoCommit <- liftIO $ fetchCardanoCommitFromDaedalus grDaedalusCommit
   printf ("Cardano commit: "%s%"\n") grCardanoCommit
-  pure GlobalResults{..}
+  pure GlobalResults{grDaedalusCommit,grCardanoCommit,grDaedalusVersion,grCardanoVersion,grApplicationVersion}
 
 -- | Gets package.json version from Daedalus sources.
 fetchDaedalusVersion :: Text -> IO Text
@@ -69,7 +58,7 @@ fetchCardanoCommitFromDaedalus rev = getRev <$> fetchDaedalusJSON "cardano-sl-sr
   where
     getRev v = v ^?! key "rev" . _String
 
-fetchDaedalusJSON :: FilePath -> Text -> IO S8.ByteString
+fetchDaedalusJSON :: Turtle.FilePath -> Text -> IO S8.ByteString
 fetchDaedalusJSON json rev = do
   res <- nixEvalExpr (fetchDaedalusNixExpr rev)
   loadFile json (FP.fromText $ (res ^?! _String))
@@ -84,7 +73,7 @@ fetchCardanoVersionFromDaedalus rev = getString <$> nixEvalExpr expr
     expr = format ("(import "%s%" {}).daedalus-bridge.version") (fetchDaedalusNixExpr rev)
 
 -- | Returns the store path of daedalus-bridge.
-fetchDaedalusBridge :: MonadManaged m => Rev -> m FilePath
+fetchDaedalusBridge :: Rev -> Managed Turtle.FilePath
 fetchDaedalusBridge rev = nixBuildExpr expr
   where expr = format ("(import "%s%" {}).daedalus-bridge") (fetchDaedalusNixExpr rev)
 
@@ -95,10 +84,9 @@ fetchDaedalusNixExpr = format ("(builtins.fetchTarball "%s%s%".tar.gz)") url
 
 -- | Gets version information from the config files in the
 -- daedalus-bridge derivation.
-grabAppVersion :: MonadManaged m
-               => Rev     -- ^ git commit id to check out
+grabAppVersion :: Rev     -- ^ git commit id to check out
                -> ApplicationVersionKey -- ^ yaml keys to find
-               -> m Int     -- ^ an integer version
+               -> Managed Int     -- ^ an integer version
 grabAppVersion rev key' = do
   bridge <- fetchDaedalusBridge rev
   liftIO $ do
@@ -107,6 +95,7 @@ grabAppVersion rev key' = do
 
 appVersionFromConfig :: ApplicationVersionKey -> ConfigurationYaml -> IO Int
 appVersionFromConfig key' cfg = case (ver Win64, ver Mac64) of
+  -- TODO, doesnt check that the linux version matches the rest
   (Nothing, _)            -> fail "configuration-key missing"
   (_, Nothing)            -> fail "configuration-key missing"
   (win, mac) | win /= mac -> fail "applicationVersions dont match"
@@ -128,7 +117,7 @@ instance Show InstallerNetwork where
 -- | Determine which cardano network an installer is for based on its
 -- filename. The inverse of this function is in
 -- daedalus/installers/Types.hs.
-installerNetwork :: FilePath -> Maybe InstallerNetwork
+installerNetwork :: Turtle.FilePath -> Maybe InstallerNetwork
 installerNetwork fpath | "mainnet" `T.isInfixOf` name = Just InstallerMainnet
                        | "staging" `T.isInfixOf` name = Just InstallerStaging
                        | "testnet" `T.isInfixOf` name = Just InstallerTestnet

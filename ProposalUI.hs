@@ -173,7 +173,7 @@ forResults :: MonadIO io => InstallersResults -> (Arch -> CIResult2 -> io b) -> 
 forResults rs action = needCIResult rs >>= archMapEach action
 
 uploadResultSignature :: BucketInfo -> CIResult2 -> IO (Maybe T.Text)
-uploadResultSignature bucket res = liftIO $ maybeReadFile sigFile >>= \case
+uploadResultSignature bucket res = maybeReadFile sigFile >>= \case
   Just sig -> do
     runAWS' $ uploadSignature bucket sigFile
     pure $ Just sig

@@ -1,6 +1,6 @@
 module Temp (installerHash) where
 
-import Data.ByteString as BS
+import qualified Data.ByteString as BS
 import           Crypto.Hash (Blake2b_256, Digest)
 import qualified Codec.CBOR.Encoding as E
 import qualified Crypto.Hash as Hash

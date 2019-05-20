@@ -12,20 +12,11 @@ module Iohk.Types
   , Environment(..)
   ) where
 
-import qualified Data.Map.Strict       as Map
-import           Data.String
-import           Data.Text
-import           Data.Yaml             (FromJSON (..), ToJSON (..))
-import           GHC.Generics          hiding (from, to)
-import qualified GHC.Generics          as G
-import           Prelude               hiding (FilePath)
-import qualified Turtle                as Turtle
+import           Data.Text (Text)
+import           Data.Yaml             (FromJSON, ToJSON)
+import           GHC.Generics (Generic)
 
-import           Arch
-
--- * Elementary types
---
-newtype ApplicationVersion = ApplicationVersion { getApplicationVersion :: Text } deriving (FromJSON, IsString, Show, Eq, Generic, ToJSON)
+newtype ApplicationVersion = ApplicationVersion { getApplicationVersion :: Text } deriving (FromJSON, Show, Eq, Generic, ToJSON)
 
 
 data Environment

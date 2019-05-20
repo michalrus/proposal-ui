@@ -25,10 +25,7 @@ import           Data.Text              (Text)
 import           GHC.Generics (Generic)
 
 -- * Arch
-data Arch = Linux64 | Mac64 | Win64 deriving (Show, Read, Eq, Generic)
-
-instance FromJSON Arch
-instance ToJSON Arch
+data Arch = Linux64 | Mac64 | Win64 deriving (Show, Eq)
 
 type ApplicationVersionKey = Arch -> Text
 
@@ -92,3 +89,5 @@ instance ToJSON a => ToJSON (ArchMap a) where
 -- 'fmap' is that the action receives an arch parameter.
 archMapEach :: Applicative f => (Arch -> a -> f b) -> ArchMap a -> f (ArchMap b)
 archMapEach f (ArchMap l m w) = ArchMap <$> f Linux64 l <*> f Mac64 m <*> f Win64 w
+
+{-# INLINEABLE archMapEach #-}

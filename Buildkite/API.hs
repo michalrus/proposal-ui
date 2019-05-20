@@ -6,21 +6,21 @@
 
 module Buildkite.API
   ( APIToken(APIToken)
-  , Artifact(..)
+  , Artifact(artifactFilename, artifactSha1sum)
   , listArtifactsForBuild
   , getArtifactURL
   ) where
 
-import           Network.HTTP.Simple
+import           Network.HTTP.Simple (Request, getResponseBody, httpJSON, setRequestPath, setRequestHost, setRequestPort, setRequestHeader, setRequestSecure, defaultRequest)
 import           Network.HTTP.Conduit (redirectCount)
 import           Data.Text (Text)
-import           GHC.Generics
-import           Data.Aeson
-import           Data.Aeson.Types (Options(..), camelTo2)
-import           Network.URI (URI(..), parseURI)
+import           GHC.Generics (Generic)
+import           Data.Aeson (FromJSON(parseJSON), Value, genericParseJSON, withObject, withText, defaultOptions, (.:))
+import           Data.Aeson.Types (Options(fieldLabelModifier), camelTo2)
+import           Network.URI (URI, parseURI)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import           Data.String
+import           Data.String (IsString(fromString))
 
 ----------------------------------------------------------------------------
 -- types
@@ -80,14 +80,6 @@ data Build = Build
   -- , buildPipeline    :: Pipeline
   } deriving (Generic, Show, Eq)
 
-data User = User
-  { userId        :: ID
-  , userName      :: Text -- "Keith Pitt",
-  , userEmail     :: Text --  "keith@buildkite.com",
-  , userAvatarUrl :: Text -- "https://www.gravatar.com/avatar/e14f55d3f939977cecbf51b64ff6f861",
-  , userCreatedAt :: Text -- "2015-05-22T12:36:45.309Z"
-  } deriving (Generic, Show, Eq)
-
 data Pipeline = Pipeline
   { pipelineId                              :: ID
   , pipelineUrl                             :: Text       -- "https://api.buildkite.com/v2/organizations/my-great-org/pipelines/my-pipeline",
@@ -134,16 +126,6 @@ data Job = Job
   -- no need to deserialize this structure, so disable for now
   -- , jobAgent           :: Agent
   } deriving (Generic, Show, Eq)
-
-data Agent = Agent
-  { agentId   :: ID
-  , agentUrl  :: Text
-  , agentName :: Text
-  } deriving (Generic, Show, Eq)
-
-data Paging = Paging { pageNum :: Int
-                     , pageSize :: Int
-                     } deriving (Show, Eq)
 
 data ArtifactDownload = ArtifactDownload { unArtifactDownload :: Text }
 
@@ -218,12 +200,6 @@ instance FromJSON Build where
 
 instance FromJSON Job where
   parseJSON = genericParseJSON (parseOptions "job")
-
-instance FromJSON Agent where
-  parseJSON = genericParseJSON (parseOptions "agent")
-
-instance FromJSON User where
-  parseJSON = genericParseJSON (parseOptions "user")
 
 instance FromJSON Pipeline where
   parseJSON = genericParseJSON (parseOptions "pipeline")

@@ -1,4 +1,4 @@
-{-# LANGUAGE DataKinds, DeriveGeneric, DeriveDataTypeable, FlexibleInstances, GADTs, KindSignatures, OverloadedStrings, RecordWildCards, StandaloneDeriving, ViewPatterns #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wall -Wno-name-shadowing -Wno-orphans -Wno-missing-signatures #-}
 
 module Nix
@@ -6,27 +6,18 @@ module Nix
   , nixEvalExpr
   ) where
 
-import           Prelude                   hiding (FilePath)
-
 import           Control.Monad.Catch              (Exception, throwM, MonadThrow)
-import qualified Data.Aeson                    as AE
 import           Data.Aeson                       (eitherDecodeStrict, Value)
 import qualified Data.ByteString.Char8         as S8
 import qualified Data.Text                     as T
 import qualified Data.Text.IO                  as T
 import qualified Data.Text.Encoding            as T
 import           Data.Text.Encoding.Error         (lenientDecode)
-import           Data.Yaml                        (FromJSON(..), ToJSON(..))
-import           Filesystem.Path                  (FilePath)
+import           Data.Yaml                        (FromJSON)
 import qualified Filesystem.Path.CurrentOS     as FP
 import           Turtle                    hiding (env, err, fold, prefix, procs, e, f, o, x)
 import qualified Turtle.Bytes                  as B
-import Control.Monad.Managed (MonadManaged)
 import qualified System.Process             as P
-
-
-instance FromJSON FilePath where parseJSON = AE.withText "filepath" $ \v -> pure $ fromText v
-instance ToJSON   FilePath where toJSON    = AE.String . format fp
 
 
 -- | Evaluate a nix expression, returning its value as JSON.
@@ -35,7 +26,7 @@ nixEvalExpr expr = eval >>= parseNixOutput
   where eval = procNix "nix-instantiate" [ "--json", "--read-write-mode" , "--eval" , "--expr", expr ]
 
 -- | Build a nix expression, returning the store path.
-nixBuildExpr :: MonadManaged m => Text -> m FilePath
+nixBuildExpr :: Text -> Managed Turtle.FilePath
 nixBuildExpr expr = do
   dir <- (T.pack . encodeString) <$> mktempdir "/tmp" "nixbuild-"
   -- using system instead of procs so that tty is available to nix
