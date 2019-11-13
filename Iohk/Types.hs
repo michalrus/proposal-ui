@@ -27,6 +27,8 @@ data Environment
   | Testnet
   | Development
   | DevOps
+  | Nightly
+  | ITNBC
   deriving (Bounded, Eq, Enum, Generic, Read, Show)
 instance FromJSON Environment
 

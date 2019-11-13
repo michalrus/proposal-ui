@@ -24,14 +24,18 @@ import qualified Data.Vector as V
 import Types (Dialog(Dialog, dRender, dHandleEvent), AppState, Name(Menu1), DialogReply(DialogReplyContinue, DialogReplyLiftIO), CustomEvent)
 import PromptString (spawnPromptString)
 
-import Iohk.Types (Environment(Testnet, Development, Staging, Production))
+import Iohk.Types (Environment(Testnet, Development, Staging, Production, Nightly, ITNBC))
 import Arch (Arch(Win64, Mac64, Linux64), ArchMap, archMapEach, idArchMap, archMapFromList, archMapToList, archMap, lookupArch)
 import UpdateLogic (InstallersResults(globalResult, ciResults, InstallersResults), CIResult2(CIFetchedResult, cifBlakeCbor, cifLocal, cifSha256, cifResult), CIResult(CIResult, ciResultUrl, ciResultDownloadUrl, ciResultBuildNumber, ciResultArch, ciResultSHA1Sum, ciResultFilename), InstallerPredicate, BucketInfo(BucketInfo, biBucket), installerPredicates, selectBuildNumberPredicate, getInstallersResults, updateVersionJson, runAWS', uploadHashedInstaller, uploadSignature)
-import InstallerVersions (GlobalResults(GlobalResults, grCardanoCommit, grDaedalusCommit, grApplicationVersion, grCardanoVersion, grDaedalusVersion), installerNetwork, InstallerNetwork(InstallerTestnet, InstallerStaging, InstallerMainnet))
+import InstallerVersions (GlobalResults(GlobalResults, grCardanoCommit, grDaedalusCommit, grApplicationVersion, grNodeVersion, grCardanoVersion, grDaedalusVersion), installerNetwork, InstallerNetwork(InstallerTestnet, InstallerStaging, InstallerMainnet, InstallerNightly, InstallerITNBC))
 import Github (Rev)
 import Utils (tt)
 
 import ProposalUI.Types (ProposalUIState(psCallback, psOutputDir, psDaedalusRev, psInstallers, psDownloadVersionInfo, ProposalUIState, psMenuState), MenuChoices(SetDaedalusRev, FindInstallers, SignInstallers, S3Upload, UpdateVersionJSON), InstallerData(InstallerData, idResults), DownloadVersionInfo(DownloadVersionInfo, dviVersion, dviURL, dviHash, dviSignature, dviSHA256), DownloadVersionJson(DownloadVersionJson))
+
+import Network.HTTP.Simple
+import Control.Monad.Catch
+import System.Exit (exitFailure)
 
 mkProposalUI :: ProposalUIState -> Dialog
 mkProposalUI state = Dialog { dRender = renderUI state, dHandleEvent = handleEvents state }
@@ -70,10 +74,11 @@ renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev,psDownloadVersio
       , str $ "Build#: " <> show ciResultBuildNumber
       , str $ "SHA1: " <> show ciResultSHA1Sum
       ]
-    mkGlobalResult GlobalResults{grCardanoCommit,grDaedalusCommit,grApplicationVersion,grCardanoVersion,grDaedalusVersion} =
+    mkGlobalResult GlobalResults{grCardanoCommit,grDaedalusCommit,grApplicationVersion,grCardanoVersion,grDaedalusVersion,grNodeVersion} =
       [ txt $ "Cardano rev: " <> grCardanoCommit
       , txt $ "Daedalus rev: " <> grDaedalusCommit
       , str $ "ApplicationVersion: " <> (show grApplicationVersion)
+      , txt $ "Node Version: " <> grNodeVersion
       , txt $ "Cardano Version: " <> grCardanoVersion
       , txt $ "Daedalus Version: " <> grDaedalusVersion ]
     menu :: Widget Name
@@ -117,6 +122,8 @@ installerForEnv :: Environment -> CIResult -> Bool
 installerForEnv env = matchNet . installerNetwork . ciResultFilename
   where matchNet n = case env of
           Production  -> n == Just InstallerMainnet
+          Nightly     -> n == Just InstallerNightly
+          ITNBC       -> n == Just InstallerITNBC
           Staging     -> n == Just InstallerStaging
           Testnet     -> n == Just InstallerTestnet
           Development -> True
@@ -132,6 +139,7 @@ findInstallers destDir env rev = do
     thing2 :: Managed InstallersResults
     thing2 = getInstallersResults (configurationKeys env) instP rev destDir
   installerResults <- with thing2 pure
+  print installerResults
   pure $ InstallerData installerResults
 
 -- | Step 3. Hash installers and upload to S3
@@ -213,7 +221,7 @@ mergeObjects _ b                   = b
 
 -- | Splat version info to an aeson object.
 downloadVersionInfoObject :: ArchMap DownloadVersionInfo  -> Maybe T.Text -> Value
-downloadVersionInfoObject dvis releaseNotes = mergeObjects legacy newFormat
+downloadVersionInfoObject dvis releaseNotes = newFormat
   where
     legacy :: Value
     legacy = (Object . HM.fromList . concat . map (uncurry toObject) . archMapToList) dvis
@@ -270,11 +278,18 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
             let
               act :: IO Dialog
               act = do
-                res <- findInstallers psOutputDir Production (T.pack $ fromJust psDaedalusRev)
-                let
-                  state1 = pstate { psInstallers = Just res }
-                  state2 = state1 { psMenuState = generateNewMenu state1 }
-                pure $ mkProposalUI state2
+                maybeRes <- try $ findInstallers psOutputDir ITNBC (T.pack $ fromJust psDaedalusRev)
+                case maybeRes of
+                  Left (JSONConversionException req resp msg) -> liftIO $ do
+                    print req
+                    print resp
+                    print msg
+                    exitFailure
+                  Right res -> do
+                    let
+                      state1 = pstate { psInstallers = Just res }
+                      state2 = state1 { psMenuState = generateNewMenu state1 }
+                    pure $ mkProposalUI state2
             pure $ DialogReplyLiftIO act
           SignInstallers -> do
             pure $ DialogReplyLiftIO $ do
@@ -310,7 +325,7 @@ spawnProposalUI callback = do
     yearMonthDay = formatTime defaultTimeLocale (iso8601DateFormat Nothing) now
     destDir = "proposal-cluster-" <> yearMonthDay
     state' :: ProposalUIState
-    state' = ProposalUIState (Just "639ff61007c98257278e34d2aa2809e851417d01") callback undefined Nothing (fromString destDir) Nothing
+    state' = ProposalUIState (Just "8b110e53c64608ea7bb8bd6125700eec33d82fe9") callback undefined Nothing (fromString destDir) Nothing
     menu = generateNewMenu state'
     state = state' { psMenuState = menu }
   pure $ mkProposalUI state

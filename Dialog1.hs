@@ -13,6 +13,7 @@ import qualified Data.Vector as V
 
 import FileChooser (spawnFileChooser)
 import ProposalUI (spawnProposalUI)
+import PrometheusUI (spawnPrometheusUI)
 
 data Dialog1State = Dialog1State
   { dlg1MainList :: L.List Name MainMenuChoices
@@ -20,7 +21,7 @@ data Dialog1State = Dialog1State
   , dlg1Path :: String
   }
 
-data MainMenuChoices = StartDemo | ReleasePropose | DummyPropose | StopDemo | TestFileChoice | ProposalUI deriving Show
+data MainMenuChoices = StartDemo | ReleasePropose | DummyPropose | StopDemo | TestFileChoice | ProposalUI | StartPrometheus deriving Show
 data ClusterState = Offline | Remote Cluster | LocalDemo deriving Show
 data Cluster = Mainnet | Staging | Testnet deriving Show
 
@@ -73,6 +74,9 @@ dlg1HandleEvent dState as event = do
         Just (_, ProposalUI) -> do
           spawnProposalUI $ do
             pure $ DialogReplyContinue $ mkDlg1 dState
+        Just (_, StartPrometheus) -> do
+          spawnPrometheusUI $ do
+            pure $ DialogReplyContinue $ mkDlg1 dState
         _ -> do
           pure $ mkDlg1 dState
   case event of
@@ -89,4 +93,4 @@ spawnDialog1 :: Dialog
 spawnDialog1 = mkDlg1 state
   where
     state = Dialog1State mainMenu Offline ""
-    mainMenu = L.list MainMenu (V.fromList [ StartDemo, TestFileChoice, ProposalUI ]) 1
+    mainMenu = L.list MainMenu (V.fromList [ StartDemo, TestFileChoice, ProposalUI, StartPrometheus ]) 1

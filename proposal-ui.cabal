@@ -21,29 +21,31 @@ executable proposal-ui
   main-is:             Test.hs
   ghc-options:         -threaded -Weverything -Wno-implicit-prelude -Wno-missing-local-signatures -Wno-missing-exported-signatures -Wno-unsafe
   other-modules:       PromptString
-                     , Dialog1
-                     , KeyToy
-                     , UpdateLogic
                      , Appveyor
-                     , Utils
-                     , Iohk.Types
                      , Arch
-                     , Types
-                     , Temp
-                     , Nix
-                     , Github
-                     , FileChooser
-                     , Cardano
-                     , ProposalUI
                      , Buildkite.API
+                     , Cardano
+                     , Dialog1
+                     , FileChooser
+                     , Github
                      , InstallerVersions
+                     , Iohk.Types
+                     , KeyToy
+                     , Nix
+                     , PrometheusUI
+                     , ProposalUI
                      , ProposalUI.Types
+                     , Temp
+                     , Types
+                     , UpdateLogic
+                     , Utils
   other-extensions:    NamedFieldPuns
   build-depends:       base >=4.12 && <4.13
                      , aeson
                      , amazonka
                      , amazonka-s3
                      , ansi-terminal
+                     , async
                      , brick
                      , bytestring
                      , cassava
@@ -64,8 +66,10 @@ executable proposal-ui
                      , lens-aeson
                      , managed
                      , memory
+                     , mtl
                      , network-uri
                      , process
+                     , prometheus
                      , resourcet
                      , safe
                      , system-filepath

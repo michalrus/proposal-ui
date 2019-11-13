@@ -28,6 +28,7 @@ import Arch (ApplicationVersionKey, Arch(Win64, Mac64))
 data GlobalResults = GlobalResults {
       grCardanoCommit      :: Text
     , grDaedalusCommit     :: Text
+    , grNodeVersion        :: Text
     , grApplicationVersion :: Int
     , grCardanoVersion     :: Text
     , grDaedalusVersion    :: Text
@@ -36,15 +37,18 @@ data GlobalResults = GlobalResults {
 
 findVersionInfo :: ApplicationVersionKey -> Rev -> Managed GlobalResults
 findVersionInfo keys grDaedalusCommit = do
-  grApplicationVersion <- grabAppVersion grDaedalusCommit keys
-  printf ("applicationVersion: "%d%"\n") grApplicationVersion
+  --grApplicationVersion <- grabAppVersion grDaedalusCommit keys
+  --printf ("applicationVersion: "%d%"\n") grApplicationVersion
+  let grApplicationVersion = 0
   grCardanoVersion <- liftIO $ fetchCardanoVersionFromDaedalus grDaedalusCommit
   printf ("Cardano version: "%s%"\n") grCardanoVersion
+  grNodeVersion <- liftIO $ fetchNodeVersionFromDaedalus grDaedalusCommit
+  printf ("Node Version: "%s%"\n") grNodeVersion
   grDaedalusVersion <- liftIO $ fetchDaedalusVersion grDaedalusCommit
   printf ("Daedalus version: "%s%"\n") grDaedalusVersion
   grCardanoCommit <- liftIO $ fetchCardanoCommitFromDaedalus grDaedalusCommit
   printf ("Cardano commit: "%s%"\n") grCardanoCommit
-  pure GlobalResults{grDaedalusCommit,grCardanoCommit,grDaedalusVersion,grCardanoVersion,grApplicationVersion}
+  pure GlobalResults{grDaedalusCommit,grCardanoCommit,grDaedalusVersion,grCardanoVersion,grApplicationVersion,grNodeVersion}
 
 -- | Gets package.json version from Daedalus sources.
 fetchDaedalusVersion :: Text -> IO Text
@@ -54,9 +58,9 @@ fetchDaedalusVersion rev = getVersion <$> fetchDaedalusJSON "package.json" rev
 
 -- | Gets the git rev from cardano-sl-src.json in Daedalus
 fetchCardanoCommitFromDaedalus :: Rev -> IO Rev
-fetchCardanoCommitFromDaedalus rev = getRev <$> fetchDaedalusJSON "cardano-sl-src.json" rev
+fetchCardanoCommitFromDaedalus rev = getRev <$> fetchDaedalusJSON "nix/sources.json" rev
   where
-    getRev v = v ^?! key "rev" . _String
+    getRev v = v ^?! key "cardano-wallet" . key "rev" . _String
 
 fetchDaedalusJSON :: Turtle.FilePath -> Text -> IO S8.ByteString
 fetchDaedalusJSON json rev = do
@@ -70,7 +74,14 @@ fetchCardanoVersionFromDaedalus :: Text -> IO Text
 fetchCardanoVersionFromDaedalus rev = getString <$> nixEvalExpr expr
   where
     getString val = val ^?! _String
-    expr = format ("(import "%s%" {}).daedalus-bridge.version") (fetchDaedalusNixExpr rev)
+    expr = format ("(import "%s%" {}).daedalus-bridge.wallet-version") (fetchDaedalusNixExpr rev)
+
+-- | Gets node version string from daedalus-bridge attribute of Daedalus default.nix
+fetchNodeVersionFromDaedalus :: Text -> IO Text
+fetchNodeVersionFromDaedalus rev = getString <$> nixEvalExpr expr
+  where
+    getString val = val ^?! _String
+    expr = format ("(import "%s%" {}).daedalus-bridge.node-version") (fetchDaedalusNixExpr rev)
 
 -- | Returns the store path of daedalus-bridge.
 fetchDaedalusBridge :: Rev -> Managed Turtle.FilePath
@@ -107,12 +118,14 @@ appVersionFromConfig key' cfg = case (ver Win64, ver Mac64) of
 ----------------------------------------------------------------------------
 
 -- | Cardano cluster which the installer will connect to.
-data InstallerNetwork = InstallerMainnet | InstallerStaging | InstallerTestnet deriving (Eq)
+data InstallerNetwork = InstallerMainnet | InstallerStaging | InstallerTestnet | InstallerNightly | InstallerITNBC deriving (Eq)
 
 instance Show InstallerNetwork where
   show InstallerMainnet = "Mainnet"
   show InstallerStaging = "Staging"
   show InstallerTestnet = "Testnet"
+  show InstallerNightly = "Nightly"
+  show InstallerITNBC = "Incentivized Balance Check"
 
 -- | Determine which cardano network an installer is for based on its
 -- filename. The inverse of this function is in
@@ -121,5 +134,7 @@ installerNetwork :: Turtle.FilePath -> Maybe InstallerNetwork
 installerNetwork fpath | "mainnet" `T.isInfixOf` name = Just InstallerMainnet
                        | "staging" `T.isInfixOf` name = Just InstallerStaging
                        | "testnet" `T.isInfixOf` name = Just InstallerTestnet
+                       | "itn_balance_check" `T.isInfixOf` name = Just InstallerITNBC
+                       | "nightly" `T.isInfixOf` name = Just InstallerNightly
                        | otherwise = Nothing
   where name = tt (filename fpath)
