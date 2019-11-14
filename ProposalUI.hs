@@ -30,7 +30,7 @@ import InstallerVersions (GlobalResults(GlobalResults, grCardanoCommit, grDaedal
 import Github (Rev)
 import Utils (tt)
 
-import ProposalUI.Types (ProposalUIState(..), MenuChoices(SelectCluster, SetDaedalusRev, FindInstallers, SignInstallers, S3Upload, UpdateVersionJSON, RehashInstallers), InstallerData(InstallerData, idResults), DownloadVersionInfo(DownloadVersionInfo, dviVersion, dviURL, dviHash, dviSignature, dviSHA256), DownloadVersionJson(DownloadVersionJson), ClusterConfig(ccBucket, ccBucketURL, ccEnvironment))
+import ProposalUI.Types (ProposalUIState(..), MenuChoices(SetGPGUser, SelectCluster, SetDaedalusRev, FindInstallers, SignInstallers, S3Upload, UpdateVersionJSON, RehashInstallers), InstallerData(InstallerData, idResults), DownloadVersionInfo(DownloadVersionInfo, dviVersion, dviURL, dviHash, dviSignature, dviSHA256), DownloadVersionJson(DownloadVersionJson), ClusterConfig(ccBucket, ccBucketURL, ccEnvironment))
 
 import FileChooser (spawnFileChooser)
 
@@ -40,25 +40,27 @@ mkProposalUI state = Dialog { dRender = renderUI state, dHandleEvent = handleEve
 generateNewMenu :: ProposalUIState -> L.List Name MenuChoices
 generateNewMenu ProposalUIState{psDaedalusRev,psInstallers,psDownloadVersionInfo} = L.list Menu1 (V.fromList thelist) 1
   where
-    thelist = [ SelectCluster, SetDaedalusRev ] <> maybeFindInstallers <> maybeSign <> maybeUpload <> maybeSetVersion
+    thelist = [ SetGPGUser, SelectCluster, SetDaedalusRev ] <> maybeFindInstallers <> maybeSign <> maybeUpload <> maybeSetVersion
     maybeFindInstallers = if (isJust psDaedalusRev) then [ FindInstallers ] else []
     maybeSign = if (isJust psInstallers) then [ RehashInstallers, SignInstallers ] else []
     maybeUpload = if (isJust psInstallers) then [ S3Upload ] else []
     maybeSetVersion = if (isJust psDownloadVersionInfo) then [ UpdateVersionJSON ] else []
 
 renderUI :: ProposalUIState -> AppState -> [ Widget Name ]
-renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev,psDownloadVersionInfo,psEnvironment,psBucket} _astate = [ root ]
+renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev,psDownloadVersionInfo,psEnvironment,psBucket,psGPGUser} _astate = [ root ]
   where
     root :: Widget Name
     root = vBox [ B.borderWithLabel (str "Current State") status, menu ]
     status :: Widget Name
-    status = vBox $ [ daedalusRev, currentEnv, currentBucket ] <> (mkInstallers psInstallers)
+    status = vBox $ [ daedalusRev, currentEnv, currentBucket, gpgUser psGPGUser ] <> (mkInstallers psInstallers)
     daedalusRev :: Widget Name
     daedalusRev = case psDaedalusRev of
       Nothing -> str "No Daedalus Revision set"
       Just rev -> str $ "Daeadalus Revision: " <> rev
     currentEnv = str $ "Environment: " <> show psEnvironment
     currentBucket = txt $ "Bucket: " <> (biBucket psBucket)
+    gpgUser (Just user) = txt $ "GPG User: " <> user
+    gpgUser Nothing = txt $ "using default gpg"
     mkInstallers :: Maybe InstallerData -> [ Widget Name ]
     mkInstallers (Just InstallerData{idResults = InstallersResults{ciResults,globalResult}}) =
          mkGlobalResult globalResult
@@ -83,6 +85,7 @@ renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev,psDownloadVersio
     menu :: Widget Name
     menu = B.borderWithLabel (str "Menu") $ padLeftRight 1 $ L.renderList renderRow True psMenuState
     renderRow :: Bool -> MenuChoices -> Widget Name
+    renderRow _ SetGPGUser = str "Set GPG User"
     renderRow _ SetDaedalusRev = str "Set Daedalus Revision"
     renderRow _ FindInstallers = str "Find Installers"
     renderRow _ SignInstallers = str "Sign installers with GPG"
@@ -291,6 +294,8 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
                         , psEnvironment = ccEnvironment cfg
                         }
             pure $ DialogReplyContinue dlg
+          SetGPGUser -> spawnPromptString "GPG User?" (\_ -> True) $ \user -> do
+            pure $ DialogReplyContinue $ mkProposalUI $ pstate { psGPGUser = Just $ T.pack user }
           SetDaedalusRev -> spawnPromptString "Daedalus Revision?" isValidRevision $ \rev -> do
             let
               state1 = pstate { psDaedalusRev = Just rev, psInstallers = Nothing }
@@ -348,7 +353,7 @@ spawnProposalUI callback = do
     destDir = "proposal-cluster-" <> yearMonthDay
     bucket = BucketInfo "proposal-ui-test" "proposal-ui-test.s3.amazonaws.com"
     gpgUser :: Maybe T.Text
-    gpgUser = Just "michael.bishop@iohk.io"
+    gpgUser = Nothing
     state' :: ProposalUIState
     state' = ProposalUIState (Nothing) callback undefined Nothing (fromString destDir) Nothing bucket gpgUser ITNBC
     menu = generateNewMenu state'

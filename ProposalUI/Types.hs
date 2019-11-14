@@ -47,7 +47,7 @@ data DownloadVersionJson = DownloadVersionJson
 instance ToJSON DownloadVersionJson where
   toJSON (DownloadVersionJson dvis releaseNotes) = object [ "platforms" .= dvis, "release_notes" .= releaseNotes ]
 
-data MenuChoices = SetDaedalusRev | FindInstallers | SignInstallers | S3Upload | UpdateVersionJSON | RehashInstallers | SelectCluster deriving Show
+data MenuChoices = SetDaedalusRev | FindInstallers | SignInstallers | S3Upload | UpdateVersionJSON | RehashInstallers | SelectCluster | SetGPGUser deriving Show
 
 data ProposalUIState = ProposalUIState
   { psDaedalusRev :: Maybe String
