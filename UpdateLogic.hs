@@ -22,6 +22,9 @@ module UpdateLogic
   , runAWS'
   , uploadHashedInstaller
   , uploadSignature
+  , githubWikiRecord
+  , printInstallersResults
+  , hashInstallers
   ) where
 
 import           Appveyor                         (AppveyorArtifact (AppveyorArtifact),
@@ -278,15 +281,20 @@ fetchCIResults destDir = mapM fetchResult
                             Just sha1 -> fetchCachedUrlWithSHA1 sha1
                             Nothing   -> fetchCachedUrl
       fetchCached ciResultDownloadUrl (filename ciResultFilename) localDest
-      printf ("reading " % fp % " into ram...\n") localDest
-      rawData <- BS.readFile $ FP.encodeString localDest
-      printf "hasing it twice...\n"
-      let
-        blakecbor = installerHash rawData
-        sha256 :: Digest SHA256
-        sha256 = hash rawData
-      printf "done\n"
+      (blakecbor, sha256) <- hashInstallers localDest
       pure $ CIFetchedResult r localDest blakecbor sha256
+
+hashInstallers :: Turtle.FilePath -> IO (Digest Blake2b_256, Digest SHA256)
+hashInstallers path = do
+  printf ("reading " % fp % " into ram...\n") path
+  rawData <- BS.readFile $ FP.encodeString path
+  printf "hasing it twice...\n"
+  let
+    blakecbor = installerHash rawData
+    sha256 :: Digest SHA256
+    sha256 = hash rawData
+  printf "done\n"
+  pure (blakecbor, sha256)
 
 forInstallers :: Text -> (a -> Bool) -> [a] -> (a -> IO CIResult) -> IO (Either Text [CIResult])
 forInstallers job p arts action = case filter p arts of

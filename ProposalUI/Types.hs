@@ -6,9 +6,10 @@ module ProposalUI.Types
   , ProposalUIState(..)
   , DownloadVersionJson(..)
   , InstallerData(..)
+  , ClusterConfig(..)
   ) where
 
-import           Data.Aeson         (ToJSON, toJSON, object, (.=))
+import           Data.Aeson         (ToJSON, toJSON, object, (.=), FromJSON(parseJSON), withObject, (.:))
 import Turtle (Text, FilePath)
 
 import Brick (EventM)
@@ -16,7 +17,9 @@ import qualified Brick.Widgets.List as L
 
 import Arch (ArchMap)
 import Types (Name, DialogReply)
-import UpdateLogic (InstallersResults)
+import UpdateLogic (InstallersResults, BucketInfo)
+
+import Iohk.Types (Environment)
 
 -- | Intermediate data type for the daedalus download json file.
 data DownloadVersionInfo = DownloadVersionInfo
@@ -44,7 +47,7 @@ data DownloadVersionJson = DownloadVersionJson
 instance ToJSON DownloadVersionJson where
   toJSON (DownloadVersionJson dvis releaseNotes) = object [ "platforms" .= dvis, "release_notes" .= releaseNotes ]
 
-data MenuChoices = SetDaedalusRev | FindInstallers | SignInstallers | S3Upload | UpdateVersionJSON deriving Show
+data MenuChoices = SetDaedalusRev | FindInstallers | SignInstallers | S3Upload | UpdateVersionJSON | RehashInstallers | SelectCluster deriving Show
 
 data ProposalUIState = ProposalUIState
   { psDaedalusRev :: Maybe String
@@ -53,8 +56,23 @@ data ProposalUIState = ProposalUIState
   , psInstallers :: Maybe InstallerData
   , psOutputDir :: Turtle.FilePath
   , psDownloadVersionInfo :: Maybe (ArchMap DownloadVersionInfo)
+  , psBucket :: BucketInfo
+  , psGPGUser :: Maybe Text
+  , psEnvironment :: Environment
   }
 
 data InstallerData = InstallerData
   { idResults :: InstallersResults
   }
+
+data ClusterConfig = ClusterConfig
+  { ccBucket :: Text
+  , ccBucketURL :: Text
+  , ccEnvironment :: Environment
+  }
+
+instance FromJSON ClusterConfig where
+  parseJSON = withObject "ClusterConfig" $ \o -> ClusterConfig
+    <$> o .: "bucket"
+    <*> o .: "bucket-url"
+    <*> o .: "environment"

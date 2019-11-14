@@ -5,15 +5,14 @@
 module ProposalUI (spawnProposalUI) where
 
 import qualified Data.Text as T
-import           Data.Maybe (isJust, fromMaybe, fromJust)
+import           Data.Maybe (isJust, fromJust)
 import           Control.Monad.Managed (Managed, MonadIO)
 import qualified System.Process             as P
 import           Turtle (FilePath, Shell, system, empty,single,die,format,(%),w,printf,s,fp, (<.>), testfile, readTextFile, join, fromString, encodeString, with, liftIO)
 import           Data.Time.Clock (getCurrentTime)
 import           Data.Time.Format (formatTime, defaultTimeLocale, iso8601DateFormat)
 import qualified Data.ByteString.Lazy.Char8 as L8
-import           Data.Aeson (Value(Object, String), encode, toJSON)
-import qualified Data.HashMap.Strict        as HM
+import           Data.Aeson (Value, encode, toJSON, eitherDecodeFileStrict')
 
 import Brick (Widget, BrickEvent(VtyEvent), EventM, vBox, str, strWrap, txt, padLeftRight)
 import qualified Graphics.Vty as V
@@ -25,17 +24,15 @@ import Types (Dialog(Dialog, dRender, dHandleEvent), AppState, Name(Menu1), Dial
 import PromptString (spawnPromptString)
 
 import Iohk.Types (Environment(Testnet, Development, Staging, Production, Nightly, ITNBC))
-import Arch (Arch(Win64, Mac64, Linux64), ArchMap, archMapEach, idArchMap, archMapFromList, archMapToList, archMap, lookupArch)
-import UpdateLogic (InstallersResults(globalResult, ciResults, InstallersResults), CIResult2(CIFetchedResult, cifBlakeCbor, cifLocal, cifSha256, cifResult), CIResult(CIResult, ciResultUrl, ciResultDownloadUrl, ciResultBuildNumber, ciResultArch, ciResultSHA1Sum, ciResultFilename), InstallerPredicate, BucketInfo(BucketInfo, biBucket), installerPredicates, selectBuildNumberPredicate, getInstallersResults, updateVersionJson, runAWS', uploadHashedInstaller, uploadSignature)
+import Arch (Arch(Win64, Mac64, Linux64), ArchMap, archMapEach, idArchMap, archMapFromList, archMap, lookupArch)
+import UpdateLogic (InstallersResults(globalResult, ciResults, InstallersResults), CIResult2(CIFetchedResult, cifBlakeCbor, cifLocal, cifSha256, cifResult), CIResult(CIResult, ciResultUrl, ciResultDownloadUrl, ciResultBuildNumber, ciResultArch, ciResultSHA1Sum, ciResultFilename), InstallerPredicate, BucketInfo(BucketInfo, biBucket), installerPredicates, selectBuildNumberPredicate, getInstallersResults, updateVersionJson, runAWS', uploadHashedInstaller, uploadSignature, hashInstallers)
 import InstallerVersions (GlobalResults(GlobalResults, grCardanoCommit, grDaedalusCommit, grApplicationVersion, grNodeVersion, grCardanoVersion, grDaedalusVersion), installerNetwork, InstallerNetwork(InstallerTestnet, InstallerStaging, InstallerMainnet, InstallerNightly, InstallerITNBC))
 import Github (Rev)
 import Utils (tt)
 
-import ProposalUI.Types (ProposalUIState(psCallback, psOutputDir, psDaedalusRev, psInstallers, psDownloadVersionInfo, ProposalUIState, psMenuState), MenuChoices(SetDaedalusRev, FindInstallers, SignInstallers, S3Upload, UpdateVersionJSON), InstallerData(InstallerData, idResults), DownloadVersionInfo(DownloadVersionInfo, dviVersion, dviURL, dviHash, dviSignature, dviSHA256), DownloadVersionJson(DownloadVersionJson))
+import ProposalUI.Types (ProposalUIState(..), MenuChoices(SelectCluster, SetDaedalusRev, FindInstallers, SignInstallers, S3Upload, UpdateVersionJSON, RehashInstallers), InstallerData(InstallerData, idResults), DownloadVersionInfo(DownloadVersionInfo, dviVersion, dviURL, dviHash, dviSignature, dviSHA256), DownloadVersionJson(DownloadVersionJson), ClusterConfig(ccBucket, ccBucketURL, ccEnvironment))
 
-import Network.HTTP.Simple
-import Control.Monad.Catch
-import System.Exit (exitFailure)
+import FileChooser (spawnFileChooser)
 
 mkProposalUI :: ProposalUIState -> Dialog
 mkProposalUI state = Dialog { dRender = renderUI state, dHandleEvent = handleEvents state }
@@ -43,23 +40,25 @@ mkProposalUI state = Dialog { dRender = renderUI state, dHandleEvent = handleEve
 generateNewMenu :: ProposalUIState -> L.List Name MenuChoices
 generateNewMenu ProposalUIState{psDaedalusRev,psInstallers,psDownloadVersionInfo} = L.list Menu1 (V.fromList thelist) 1
   where
-    thelist = [ SetDaedalusRev ] <> maybeFindInstallers <> maybeSign <> maybeUpload <> maybeSetVersion
+    thelist = [ SelectCluster, SetDaedalusRev ] <> maybeFindInstallers <> maybeSign <> maybeUpload <> maybeSetVersion
     maybeFindInstallers = if (isJust psDaedalusRev) then [ FindInstallers ] else []
-    maybeSign = if (isJust psInstallers) then [ SignInstallers ] else []
+    maybeSign = if (isJust psInstallers) then [ RehashInstallers, SignInstallers ] else []
     maybeUpload = if (isJust psInstallers) then [ S3Upload ] else []
     maybeSetVersion = if (isJust psDownloadVersionInfo) then [ UpdateVersionJSON ] else []
 
 renderUI :: ProposalUIState -> AppState -> [ Widget Name ]
-renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev,psDownloadVersionInfo} _astate = [ root ]
+renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev,psDownloadVersionInfo,psEnvironment,psBucket} _astate = [ root ]
   where
     root :: Widget Name
     root = vBox [ B.borderWithLabel (str "Current State") status, menu ]
     status :: Widget Name
-    status = vBox $ [ daedalusRev ] <> (mkInstallers psInstallers)
+    status = vBox $ [ daedalusRev, currentEnv, currentBucket ] <> (mkInstallers psInstallers)
     daedalusRev :: Widget Name
     daedalusRev = case psDaedalusRev of
       Nothing -> str "No Daedalus Revision set"
       Just rev -> str $ "Daeadalus Revision: " <> rev
+    currentEnv = str $ "Environment: " <> show psEnvironment
+    currentBucket = txt $ "Bucket: " <> (biBucket psBucket)
     mkInstallers :: Maybe InstallerData -> [ Widget Name ]
     mkInstallers (Just InstallerData{idResults = InstallersResults{ciResults,globalResult}}) =
          mkGlobalResult globalResult
@@ -72,7 +71,7 @@ renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev,psDownloadVersio
       , txt $ "URL: " <> ciResultUrl
       , txt $ "Download URL: " <> ciResultDownloadUrl
       , str $ "Build#: " <> show ciResultBuildNumber
-      , str $ "SHA1: " <> show ciResultSHA1Sum
+      --, str $ "SHA1: " <> show ciResultSHA1Sum
       ]
     mkGlobalResult GlobalResults{grCardanoCommit,grDaedalusCommit,grApplicationVersion,grCardanoVersion,grDaedalusVersion,grNodeVersion} =
       [ txt $ "Cardano rev: " <> grCardanoCommit
@@ -89,6 +88,8 @@ renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev,psDownloadVersio
     renderRow _ SignInstallers = str "Sign installers with GPG"
     renderRow _ S3Upload = str "Upload Installers to S3"
     renderRow _ UpdateVersionJSON = str "Set daedalus-latest-version.json"
+    renderRow _ RehashInstallers = str "Rehash installer"
+    renderRow _ SelectCluster = str "Select Cluster"
 
 configurationKeys :: Environment -> Arch -> T.Text
 configurationKeys Production Win64   = "mainnet_wallet_win64"
@@ -215,18 +216,18 @@ uploadSignatures bucket irs = fmap join . archMapFromList <$> mapM uploadSig (ci
       pure (ciResultArch $ cifResult res, sig)
 
 -- | Adds two json objects together.
-mergeObjects :: Value -> Value -> Value
+{-mergeObjects :: Value -> Value -> Value
 mergeObjects (Object a) (Object b) = Object (a <> b)
-mergeObjects _ b                   = b
+mergeObjects _ b                   = b-}
 
 -- | Splat version info to an aeson object.
 downloadVersionInfoObject :: ArchMap DownloadVersionInfo  -> Maybe T.Text -> Value
 downloadVersionInfoObject dvis releaseNotes = newFormat
   where
-    legacy :: Value
-    legacy = (Object . HM.fromList . concat . map (uncurry toObject) . archMapToList) dvis
     newFormat :: Value
     newFormat = toJSON (DownloadVersionJson dvis releaseNotes)
+    {-legacy :: Value
+    legacy = (Object . HM.fromList . concat . map (uncurry toObject) . archMapToList) dvis
     toObject :: Arch -> DownloadVersionInfo -> [ (T.Text, Value) ]
     toObject arch DownloadVersionInfo{dviVersion,dviURL,dviHash,dviSignature,dviSHA256} = attrs
       where
@@ -240,7 +241,7 @@ downloadVersionInfoObject dvis releaseNotes = newFormat
                     ] ]
     keyPrefix Mac64   = "macos"
     keyPrefix Win64   = "win64"
-    keyPrefix Linux64 = "linux"
+    keyPrefix Linux64 = "linux"-}
 
 makeDownloadVersionInfo :: InstallersResults
                         -> ArchMap CIResult2
@@ -258,10 +259,19 @@ makeDownloadVersionInfo InstallersResults{globalResult} resultMap urls sigs = ar
       , dviSignature = lookupArch a sigs
       }
 
-handleEvents :: ProposalUIState -> AppState -> BrickEvent Name CustomEvent -> EventM Name DialogReply
-handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOutputDir,psDownloadVersionInfo} _astate event = do
+rehashInstallers :: InstallerData -> IO InstallerData
+rehashInstallers InstallerData{idResults} = do
   let
-    bucket = BucketInfo "proposal-ui-test" "proposal-ui-test.s3.amazonaws.com"
+    rehashInstaller :: CIResult2 -> IO CIResult2
+    rehashInstaller input = do
+      (blakecbor, sha256) <- hashInstallers $ cifLocal input
+      pure $ input { cifBlakeCbor = blakecbor, cifSha256 = sha256 }
+  rehashed <- mapM rehashInstaller (ciResults idResults)
+  pure $ InstallerData $ InstallersResults rehashed (globalResult idResults)
+
+handleEvents :: ProposalUIState -> AppState -> BrickEvent Name CustomEvent -> EventM Name DialogReply
+handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOutputDir,psDownloadVersionInfo,psBucket,psGPGUser} _astate event = do
+  let
     isValidRevision :: String -> Bool
     isValidRevision = all isValidChar
     isValidChar char = ( (char >= 'a') && (char <= 'f') ) || ( (char >= '0') && (char <= '9') )
@@ -269,6 +279,18 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
     openThing = do
       case L.listSelectedElement psMenuState of
         Just (_index, item) -> case item of
+          SelectCluster -> do
+            dlg <- spawnFileChooser "clusters" $ \mPath -> do
+              case mPath of
+                Just path -> do
+                  eCfg <- liftIO $ eitherDecodeFileStrict' ("clusters/" <> path)
+                  case eCfg of
+                    Right cfg ->
+                      pure $ DialogReplyContinue $ mkProposalUI $ pstate
+                        { psBucket = BucketInfo (ccBucket cfg) (ccBucketURL cfg)
+                        , psEnvironment = ccEnvironment cfg
+                        }
+            pure $ DialogReplyContinue dlg
           SetDaedalusRev -> spawnPromptString "Daedalus Revision?" isValidRevision $ \rev -> do
             let
               state1 = pstate { psDaedalusRev = Just rev, psInstallers = Nothing }
@@ -278,34 +300,34 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
             let
               act :: IO Dialog
               act = do
-                maybeRes <- try $ findInstallers psOutputDir ITNBC (T.pack $ fromJust psDaedalusRev)
-                case maybeRes of
-                  Left (JSONConversionException req resp msg) -> liftIO $ do
-                    print req
-                    print resp
-                    print msg
-                    exitFailure
-                  Right res -> do
-                    let
-                      state1 = pstate { psInstallers = Just res }
-                      state2 = state1 { psMenuState = generateNewMenu state1 }
-                    pure $ mkProposalUI state2
+                res <- findInstallers psOutputDir ITNBC (T.pack $ fromJust psDaedalusRev)
+                let
+                  state1 = pstate { psInstallers = Just res }
+                  state2 = state1 { psMenuState = generateNewMenu state1 }
+                pure $ mkProposalUI state2
             pure $ DialogReplyLiftIO act
           SignInstallers -> do
             pure $ DialogReplyLiftIO $ do
-              updateProposalSignInstallers (idResults $ fromJust psInstallers) (Just "michael.bishop@iohk.io")
+              updateProposalSignInstallers (idResults $ fromJust psInstallers) psGPGUser
               -- TODO, flag as signed, and give a popup saying success/fail
               pure $ mkProposalUI pstate
           S3Upload -> do
             pure $ DialogReplyLiftIO $ do
-              dvis <- single $ updateProposalUploadS3 bucket (fromJust psInstallers)
+              dvis <- single $ updateProposalUploadS3 psBucket (fromJust psInstallers)
               let
                 state1 = pstate { psDownloadVersionInfo = Just dvis }
                 state2 = state1 { psMenuState = generateNewMenu state1 }
               pure $ mkProposalUI state2
           UpdateVersionJSON -> do
-            _url <- liftIO $ updateVersionJSON bucket (fromJust psDownloadVersionInfo)
+            _url <- liftIO $ updateVersionJSON psBucket (fromJust psDownloadVersionInfo)
             pure $ DialogReplyContinue $ mkProposalUI pstate
+          RehashInstallers -> do
+            pure $ DialogReplyLiftIO $ do
+              newInstallerData <- rehashInstallers (fromJust psInstallers)
+              let
+                state1 = pstate { psInstallers = Just newInstallerData, psDownloadVersionInfo = Nothing }
+                state2 = state1 { psMenuState = generateNewMenu state1 }
+              pure $ mkProposalUI state2
         Nothing -> pure $ DialogReplyContinue $ mkProposalUI pstate -- nothing selected, do nothing
   case event of
     VtyEvent (V.EvKey (V.KChar 'q') []) -> do
@@ -324,8 +346,11 @@ spawnProposalUI callback = do
   let
     yearMonthDay = formatTime defaultTimeLocale (iso8601DateFormat Nothing) now
     destDir = "proposal-cluster-" <> yearMonthDay
+    bucket = BucketInfo "proposal-ui-test" "proposal-ui-test.s3.amazonaws.com"
+    gpgUser :: Maybe T.Text
+    gpgUser = Just "michael.bishop@iohk.io"
     state' :: ProposalUIState
-    state' = ProposalUIState (Just "8b110e53c64608ea7bb8bd6125700eec33d82fe9") callback undefined Nothing (fromString destDir) Nothing
+    state' = ProposalUIState (Nothing) callback undefined Nothing (fromString destDir) Nothing bucket gpgUser ITNBC
     menu = generateNewMenu state'
     state = state' { psMenuState = menu }
   pure $ mkProposalUI state

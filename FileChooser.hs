@@ -1,3 +1,5 @@
+{-# LANGUAGE NamedFieldPuns #-}
+
 module FileChooser (spawnFileChooser) where
 
 import System.Directory (canonicalizePath, getDirectoryContents, doesDirectoryExist)
@@ -36,9 +38,9 @@ generateCurrentListing dir = do
   files' <- mapM toFileEntry files
   pure $ L.list FileChoice (V.fromList $ sort files') 1
 
-spawnFileChooser :: (Maybe String -> EventM Name DialogReply) -> EventM Name Dialog
-spawnFileChooser callback = do
-  currentDir <- liftIO $ canonicalizePath "."
+spawnFileChooser :: FilePath -> (Maybe String -> EventM Name DialogReply) -> EventM Name Dialog
+spawnFileChooser startingDirectory callback = do
+  currentDir <- liftIO $ canonicalizePath startingDirectory
   listState <- liftIO $ generateCurrentListing currentDir
   pure $ mkFileChooser $ ChooserState callback currentDir listState
 
@@ -55,12 +57,17 @@ renderFileChooser state _as = [ box ]
     renderRow _ (File name) = str name
 
 handleEventFileChooser :: ChooserState -> AppState -> BrickEvent Name CustomEvent -> EventM Name DialogReply
-handleEventFileChooser state _as event = do
+handleEventFileChooser state@ChooserState{csList,csCallback} _as event = do
   case event of
     VtyEvent (V.EvKey (V.KChar 'q') []) -> do
-      (csCallback state) Nothing
+      csCallback Nothing
+    VtyEvent (V.EvKey V.KEnter []) -> do
+      case L.listSelectedElement csList of
+        Just (_index, File name ) ->
+          csCallback $ Just name
+        _ -> csCallback Nothing
     VtyEvent evt -> do
-      newlist <- L.handleListEventVi L.handleListEvent evt (csList state)
+      newlist <- L.handleListEventVi L.handleListEvent evt csList
       pure $ DialogReplyContinue $ mkFileChooser $ state { csList = newlist }
     _ -> do
       pure $ DialogReplyContinue $ mkFileChooser state

@@ -3,20 +3,18 @@
 
 module PrometheusUI (spawnPrometheusUI) where
 
-import Brick
-import Types
-import qualified Brick.Widgets.Border as B
-import qualified Brick.Widgets.List as L
+import           Brick (EventM, Widget, BrickEvent(VtyEvent), str)
+import           Types (Name, Dialog(Dialog,dRender,dHandleEvent), DialogReply(DialogReplyContinue), AppState, CustomEvent)
 import qualified Graphics.Vty as V
 
 import           Control.Monad.IO.Class                         (liftIO)
 import           System.Metrics.Prometheus.Http.Scrape (serveHttpTextMetricsT)
-import           System.Metrics.Prometheus.Concurrent.RegistryT
+import           System.Metrics.Prometheus.Concurrent.RegistryT (runRegistryT, registerCounter, RegistryT(RegistryT, unRegistryT))
 import           System.Metrics.Prometheus.Metric.Counter       (inc, Counter)
 import           System.Metrics.Prometheus.MetricId (fromList)
 
-import Control.Concurrent.Async
-import Control.Monad.Reader
+import           Control.Concurrent.Async (Async, async, cancel)
+import           Control.Monad.Reader (ask, runReaderT)
 
 data PrometheusState = PrometheusState
   { psCounter :: Counter
@@ -44,10 +42,10 @@ startServer = do
     pure (connectCounter, server)
 
 renderUI :: PrometheusState -> AppState -> [ Widget Name ]
-renderUI PrometheusState{msg} astate = [ str msg ]
+renderUI PrometheusState{msg} _ = [ str msg ]
 
 handleEvents :: PrometheusState -> AppState -> BrickEvent Name CustomEvent -> EventM Name DialogReply
-handleEvents pstate@PrometheusState{psCallback,psState,psCounter} astate event = do
+handleEvents pstate@PrometheusState{psCallback,psState,psCounter} _ event = do
   liftIO $ inc psCounter
   case event of
     VtyEvent (V.EvKey (V.KChar 'q') []) -> do

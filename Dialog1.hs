@@ -67,7 +67,7 @@ dlg1HandleEvent dState as event = do
             , dlg1MainList = L.list MainMenu (V.fromList [ StartDemo, TestFileChoice ]) 1
             }
         Just (_, TestFileChoice) -> do
-          spawnFileChooser $ \mPath -> do
+          spawnFileChooser "." $ \mPath -> do
             pure $ case mPath of
               Just path -> DialogReplyContinue $ mkDlg1 $ dState { dlg1Path = path }
               Nothing -> DialogReplyContinue $ mkDlg1 dState

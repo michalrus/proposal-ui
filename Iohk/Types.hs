@@ -30,5 +30,5 @@ data Environment
   | Nightly
   | ITNBC
   deriving (Bounded, Eq, Enum, Generic, Read, Show)
-instance FromJSON Environment
 
+instance FromJSON Environment

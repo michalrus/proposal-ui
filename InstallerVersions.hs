@@ -11,19 +11,15 @@ module InstallerVersions
 import           Control.Lens               ((^?!))
 import           Data.Aeson.Lens            (key, _String)
 import qualified Data.ByteString.Lazy.Char8 as S8
-import qualified Data.HashMap.Strict        as HM
 import           Data.Text                  (Text)
 import qualified Data.Text                  as T
-import qualified Data.Yaml                  as Y
 import qualified Filesystem.Path.CurrentOS  as FP
-import           Turtle                     (FilePath, Managed, printf,d, liftIO, (%),s,format, (</>), filename)
+import           Turtle                     (FilePath, Managed, printf, liftIO, (%),s,format, (</>), filename)
 
-import           Cardano                    (ConfigurationYaml,
-                                             applicationVersion, update, ConfigurationRoot)
 import           Github                     (Rev)
 import           Nix                        (nixBuildExpr, nixEvalExpr)
 import           Utils                      (tt)
-import Arch (ApplicationVersionKey, Arch(Win64, Mac64))
+import Arch (ApplicationVersionKey)
 
 data GlobalResults = GlobalResults {
       grCardanoCommit      :: Text
@@ -36,10 +32,10 @@ data GlobalResults = GlobalResults {
 
 
 findVersionInfo :: ApplicationVersionKey -> Rev -> Managed GlobalResults
-findVersionInfo keys grDaedalusCommit = do
+findVersionInfo _keys grDaedalusCommit = do
   --grApplicationVersion <- grabAppVersion grDaedalusCommit keys
   --printf ("applicationVersion: "%d%"\n") grApplicationVersion
-  let grApplicationVersion = 0
+  let grApplicationVersion = 0 :: Int
   grCardanoVersion <- liftIO $ fetchCardanoVersionFromDaedalus grDaedalusCommit
   printf ("Cardano version: "%s%"\n") grCardanoVersion
   grNodeVersion <- liftIO $ fetchNodeVersionFromDaedalus grDaedalusCommit
@@ -83,17 +79,17 @@ fetchNodeVersionFromDaedalus rev = getString <$> nixEvalExpr expr
     getString val = val ^?! _String
     expr = format ("(import "%s%" {}).daedalus-bridge.node-version") (fetchDaedalusNixExpr rev)
 
--- | Returns the store path of daedalus-bridge.
+{-- | Returns the store path of daedalus-bridge.
 fetchDaedalusBridge :: Rev -> Managed Turtle.FilePath
 fetchDaedalusBridge rev = nixBuildExpr expr
-  where expr = format ("(import "%s%" {}).daedalus-bridge") (fetchDaedalusNixExpr rev)
+  where expr = format ("(import "%s%" {}).daedalus-bridge") (fetchDaedalusNixExpr rev)-}
 
 -- | A nix expression to import a specific revision of Deadalus from git.
 fetchDaedalusNixExpr :: Rev -> Text
 fetchDaedalusNixExpr = format ("(builtins.fetchTarball "%s%s%".tar.gz)") url
   where url = "https://github.com/input-output-hk/daedalus/archive/" :: Text
 
--- | Gets version information from the config files in the
+{-- | Gets version information from the config files in the
 -- daedalus-bridge derivation.
 grabAppVersion :: Rev     -- ^ git commit id to check out
                -> ApplicationVersionKey -- ^ yaml keys to find
@@ -102,9 +98,9 @@ grabAppVersion rev key' = do
   bridge <- fetchDaedalusBridge rev
   liftIO $ do
     (Right fullConfiguration) <- Y.decodeFileEither (FP.encodeString $ bridge </> "config/configuration.yaml")
-    appVersionFromConfig key' fullConfiguration
+    appVersionFromConfig key' fullConfiguration-}
 
-appVersionFromConfig :: ApplicationVersionKey -> ConfigurationYaml -> IO Int
+{-appVersionFromConfig :: ApplicationVersionKey -> ConfigurationYaml -> IO Int
 appVersionFromConfig key' cfg = case (ver Win64, ver Mac64) of
   -- TODO, doesnt check that the linux version matches the rest
   (Nothing, _)            -> fail "configuration-key missing"
@@ -113,7 +109,7 @@ appVersionFromConfig key' cfg = case (ver Win64, ver Mac64) of
   (Just val, Just _)      -> pure (applicationVersion $ update val)
   where
     ver :: Arch -> Maybe Cardano.ConfigurationRoot
-    ver a = HM.lookup (key' a) cfg
+    ver a = HM.lookup (key' a) cfg-}
 
 ----------------------------------------------------------------------------
 
