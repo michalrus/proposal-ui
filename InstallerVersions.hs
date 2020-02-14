@@ -114,7 +114,7 @@ appVersionFromConfig key' cfg = case (ver Win64, ver Mac64) of
 ----------------------------------------------------------------------------
 
 -- | Cardano cluster which the installer will connect to.
-data InstallerNetwork = InstallerMainnet | InstallerStaging | InstallerTestnet | InstallerNightly | InstallerITNBC deriving (Eq)
+data InstallerNetwork = InstallerMainnet | InstallerStaging | InstallerTestnet | InstallerNightly | InstallerITNBC | InstallerITNRW deriving (Eq)
 
 instance Show InstallerNetwork where
   show InstallerMainnet = "Mainnet"
@@ -131,6 +131,7 @@ installerNetwork fpath | "mainnet" `T.isInfixOf` name = Just InstallerMainnet
                        | "staging" `T.isInfixOf` name = Just InstallerStaging
                        | "testnet" `T.isInfixOf` name = Just InstallerTestnet
                        | "itn_balance_check" `T.isInfixOf` name = Just InstallerITNBC
+                       | "itn_rewards_v1" `T.isInfixOf` name = Just InstallerITNRW
                        | "nightly" `T.isInfixOf` name = Just InstallerNightly
                        | otherwise = Nothing
   where name = tt (filename fpath)

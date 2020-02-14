@@ -1,0 +1,6 @@
+{
+  "bucket":"proposal-ui-test",
+  "bucket-url":"proposal-ui-test.s3.amazonaws.com",
+  "environment":"Production"
+}
+

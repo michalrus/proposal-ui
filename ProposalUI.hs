@@ -23,10 +23,10 @@ import qualified Data.Vector as V
 import Types (Dialog(Dialog, dRender, dHandleEvent), AppState, Name(Menu1), DialogReply(DialogReplyContinue, DialogReplyLiftIO), CustomEvent)
 import PromptString (spawnPromptString)
 
-import Iohk.Types (Environment(Testnet, Development, Staging, Production, Nightly, ITNBC))
+import Iohk.Types (Environment(Testnet, Development, Staging, Production, Nightly, ITNBC, ITNRW))
 import Arch (Arch(Win64, Mac64, Linux64), ArchMap, archMapEach, idArchMap, archMapFromList, archMap, lookupArch)
 import UpdateLogic (InstallersResults(globalResult, ciResults, InstallersResults), CIResult2(CIFetchedResult, cifBlakeCbor, cifLocal, cifSha256, cifResult), CIResult(CIResult, ciResultUrl, ciResultDownloadUrl, ciResultBuildNumber, ciResultArch, ciResultSHA1Sum, ciResultFilename), InstallerPredicate, BucketInfo(BucketInfo, biBucket), installerPredicates, selectBuildNumberPredicate, getInstallersResults, updateVersionJson, runAWS', uploadHashedInstaller, uploadSignature, hashInstallers)
-import InstallerVersions (GlobalResults(GlobalResults, grCardanoCommit, grDaedalusCommit, grApplicationVersion, grNodeVersion, grCardanoVersion, grDaedalusVersion), installerNetwork, InstallerNetwork(InstallerTestnet, InstallerStaging, InstallerMainnet, InstallerNightly, InstallerITNBC))
+import InstallerVersions (GlobalResults(GlobalResults, grCardanoCommit, grDaedalusCommit, grApplicationVersion, grNodeVersion, grCardanoVersion, grDaedalusVersion), installerNetwork, InstallerNetwork(InstallerTestnet, InstallerStaging, InstallerMainnet, InstallerNightly, InstallerITNBC, InstallerITNRW))
 import Github (Rev)
 import Utils (tt)
 
@@ -128,6 +128,7 @@ installerForEnv env = matchNet . installerNetwork . ciResultFilename
           Production  -> n == Just InstallerMainnet
           Nightly     -> n == Just InstallerNightly
           ITNBC       -> n == Just InstallerITNBC
+          ITNRW       -> n == Just InstallerITNRW
           Staging     -> n == Just InstallerStaging
           Testnet     -> n == Just InstallerTestnet
           Development -> True
@@ -305,7 +306,7 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
             let
               act :: IO Dialog
               act = do
-                res <- findInstallers psOutputDir ITNBC (T.pack $ fromJust psDaedalusRev)
+                res <- findInstallers psOutputDir ITNRW (T.pack $ fromJust psDaedalusRev)
                 let
                   state1 = pstate { psInstallers = Just res }
                   state2 = state1 { psMenuState = generateNewMenu state1 }
@@ -355,7 +356,7 @@ spawnProposalUI callback = do
     gpgUser :: Maybe T.Text
     gpgUser = Nothing
     state' :: ProposalUIState
-    state' = ProposalUIState (Nothing) callback undefined Nothing (fromString destDir) Nothing bucket gpgUser ITNBC
+    state' = ProposalUIState (Nothing) callback undefined Nothing (fromString destDir) Nothing bucket gpgUser ITNRW
     menu = generateNewMenu state'
     state = state' { psMenuState = menu }
   pure $ mkProposalUI state

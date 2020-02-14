@@ -29,6 +29,7 @@ data Environment
   | DevOps
   | Nightly
   | ITNBC
+  | ITNRW
   deriving (Bounded, Eq, Enum, Generic, Read, Show)
 
 instance FromJSON Environment

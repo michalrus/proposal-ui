@@ -42,7 +42,7 @@ import           Buildkite.API                    (APIToken (APIToken),
 import qualified Buildkite.API                    as BK
 import           Control.Applicative              ((<|>))
 import           Control.Exception                (try)
-import           Control.Lens                     (to, (^.))
+import           Control.Lens                     (to, (^.), set, (<&>))
 import qualified Control.Lens                     as Lens
 import           Control.Monad                    (forM_, guard)
 import           Control.Monad.IO.Class           (liftIO)
@@ -61,9 +61,9 @@ import           GHC.Generics                     (Generic)
 import           Github                           (Rev, Status, context,
                                                    fetchGithubStatus, statuses,
                                                    targetUrl)
-import           Network.AWS                      (AWS, Credentials (Discover),
-                                                   Region, chunkedFile,
-                                                   defaultChunkSize, newEnv,
+import           Network.AWS                      (AWS, Credentials (Discover), newLogger,
+                                                   Region, chunkedFile, envLogger,
+                                                   defaultChunkSize, newEnv, LogLevel(Debug),
                                                    runAWS, send, toBody, within)
 import           Network.AWS.S3.CopyObject        (coACL, copyObject)
 import           Network.AWS.S3.GetBucketLocation (gblbrsLocationConstraint,
@@ -84,6 +84,7 @@ import           System.IO.Error                  (ioeGetErrorString)
 import           Turtle                           (MonadIO, d, die, format, fp, (</>),
                                                    makeFormat, printf, s, void, FilePath, filename,
                                                    w, (%), Managed)
+import System.IO (stdout)
 
 import           InstallerVersions                (GlobalResults (GlobalResults, grApplicationVersion, grCardanoCommit, grCardanoVersion, grDaedalusCommit, grDaedalusVersion),
                                                    InstallerNetwork (InstallerMainnet, InstallerStaging, InstallerTestnet),
@@ -425,7 +426,8 @@ bucketRegion = fmap getRegion . send . getBucketLocation
 
 runAWS' :: MonadIO io => AWS a -> io a
 runAWS' action = liftIO $ do
-  env <- newEnv Discover
+  lgr  <- newLogger Debug stdout
+  env <- newEnv Discover <&> set envLogger lgr
   runResourceT . runAWS env $ action
 
 withinBucketRegion :: BucketName -> (Region -> AWS a) -> AWS a
