@@ -15,7 +15,7 @@ import qualified Data.Text.Encoding            as T
 import           Data.Text.Encoding.Error         (lenientDecode)
 import           Data.Yaml                        (FromJSON)
 import qualified Filesystem.Path.CurrentOS     as FP
-import           Turtle                    hiding (env, err, fold, prefix, procs, e, f, o, x)
+import           Turtle                           (Text, Managed, FilePath, ExitCode(ExitFailure, ExitSuccess), empty, system, liftIO, mktempdir, encodeString)
 import qualified Turtle.Bytes                  as B
 import qualified System.Process             as P
 

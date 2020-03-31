@@ -30,6 +30,7 @@ data Environment
   | Nightly
   | ITNBC
   | ITNRW
+  | MainnetFlight
   deriving (Bounded, Eq, Enum, Generic, Read, Show)
 
 instance FromJSON Environment

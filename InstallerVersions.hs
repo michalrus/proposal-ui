@@ -17,7 +17,7 @@ import qualified Filesystem.Path.CurrentOS  as FP
 import           Turtle                     (FilePath, Managed, printf, liftIO, (%),s,format, (</>), filename)
 
 import           Github                     (Rev)
-import           Nix                        (nixBuildExpr, nixEvalExpr)
+import           Nix                        (nixEvalExpr)
 import           Utils                      (tt)
 import Arch (ApplicationVersionKey)
 
@@ -114,7 +114,7 @@ appVersionFromConfig key' cfg = case (ver Win64, ver Mac64) of
 ----------------------------------------------------------------------------
 
 -- | Cardano cluster which the installer will connect to.
-data InstallerNetwork = InstallerMainnet | InstallerStaging | InstallerTestnet | InstallerNightly | InstallerITNBC | InstallerITNRW deriving (Eq)
+data InstallerNetwork = InstallerMainnet | InstallerStaging | InstallerTestnet | InstallerNightly | InstallerITNBC | InstallerITNRW | InstallerMainnetFlight deriving (Eq)
 
 instance Show InstallerNetwork where
   show InstallerMainnet = "Mainnet"
@@ -122,12 +122,16 @@ instance Show InstallerNetwork where
   show InstallerTestnet = "Testnet"
   show InstallerNightly = "Nightly"
   show InstallerITNBC = "Incentivized Balance Check"
+  show InstallerMainnetFlight = "Mainnet Flight"
+  show InstallerITNRW = "Incentivized Rewards"
 
 -- | Determine which cardano network an installer is for based on its
 -- filename. The inverse of this function is in
 -- daedalus/installers/Types.hs.
 installerNetwork :: Turtle.FilePath -> Maybe InstallerNetwork
-installerNetwork fpath | "mainnet" `T.isInfixOf` name = Just InstallerMainnet
+installerNetwork fpath | "mainnet-flight" `T.isInfixOf` name = Just InstallerMainnetFlight
+                       | "mainnet_flight" `T.isInfixOf` name = Just InstallerMainnetFlight
+                       | "mainnet" `T.isInfixOf` name = Just InstallerMainnet
                        | "staging" `T.isInfixOf` name = Just InstallerStaging
                        | "testnet" `T.isInfixOf` name = Just InstallerTestnet
                        | "itn_balance_check" `T.isInfixOf` name = Just InstallerITNBC

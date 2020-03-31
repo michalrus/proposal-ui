@@ -23,14 +23,20 @@ import qualified Data.Vector as V
 import Types (Dialog(Dialog, dRender, dHandleEvent), AppState, Name(Menu1), DialogReply(DialogReplyContinue, DialogReplyLiftIO), CustomEvent)
 import PromptString (spawnPromptString)
 
-import Iohk.Types (Environment(Testnet, Development, Staging, Production, Nightly, ITNBC, ITNRW))
+import Iohk.Types (Environment(Testnet, Development, Staging, Production, Nightly, ITNBC, ITNRW, MainnetFlight))
 import Arch (Arch(Win64, Mac64, Linux64), ArchMap, archMapEach, idArchMap, archMapFromList, archMap, lookupArch)
-import UpdateLogic (InstallersResults(globalResult, ciResults, InstallersResults), CIResult2(CIFetchedResult, cifBlakeCbor, cifLocal, cifSha256, cifResult), CIResult(CIResult, ciResultUrl, ciResultDownloadUrl, ciResultBuildNumber, ciResultArch, ciResultSHA1Sum, ciResultFilename), InstallerPredicate, BucketInfo(BucketInfo, biBucket), installerPredicates, selectBuildNumberPredicate, getInstallersResults, updateVersionJson, runAWS', uploadHashedInstaller, uploadSignature, hashInstallers)
-import InstallerVersions (GlobalResults(GlobalResults, grCardanoCommit, grDaedalusCommit, grApplicationVersion, grNodeVersion, grCardanoVersion, grDaedalusVersion), installerNetwork, InstallerNetwork(InstallerTestnet, InstallerStaging, InstallerMainnet, InstallerNightly, InstallerITNBC, InstallerITNRW))
+import UpdateLogic (InstallersResults(globalResult, ciResults, InstallersResults), CIResult2(CIFetchedResult, cifBlakeCbor, cifLocal, cifSha256, cifResult)
+                   , CIResult(CIResult, ciResultUrl, ciResultDownloadUrl, ciResultBuildNumber, ciResultArch, ciResultFilename)
+                   , InstallerPredicate, BucketInfo(BucketInfo, biBucket), installerPredicates, selectBuildNumberPredicate, getInstallersResults
+                   , updateVersionJson, runAWS', uploadHashedInstaller, uploadSignature, hashInstallers)
+import InstallerVersions (GlobalResults(GlobalResults, grCardanoCommit, grDaedalusCommit, grApplicationVersion, grNodeVersion, grCardanoVersion, grDaedalusVersion), installerNetwork, InstallerNetwork(InstallerTestnet, InstallerStaging, InstallerMainnet, InstallerNightly, InstallerITNBC, InstallerITNRW, InstallerMainnetFlight))
 import Github (Rev)
 import Utils (tt)
 
-import ProposalUI.Types (ProposalUIState(..), MenuChoices(SetGPGUser, SelectCluster, SetDaedalusRev, FindInstallers, SignInstallers, S3Upload, UpdateVersionJSON, RehashInstallers), InstallerData(InstallerData, idResults), DownloadVersionInfo(DownloadVersionInfo, dviVersion, dviURL, dviHash, dviSignature, dviSHA256), DownloadVersionJson(DownloadVersionJson), ClusterConfig(ccBucket, ccBucketURL, ccEnvironment))
+import ProposalUI.Types (ProposalUIState(psDownloadVersionInfo,psMenuState,psDaedalusRev,psInstallers,psEnvironment,psBucket,psGPGUser,ProposalUIState,psOutputDir,psCallback)
+                        , MenuChoices(SetGPGUser, SelectCluster, SetDaedalusRev, FindInstallers, SignInstallers, S3Upload, UpdateVersionJSON, RehashInstallers)
+                        , InstallerData(InstallerData, idResults), DownloadVersionInfo(DownloadVersionInfo, dviVersion, dviURL, dviHash, dviSignature, dviSHA256)
+                        , DownloadVersionJson(DownloadVersionJson), ClusterConfig(ccBucket, ccBucketURL, ccEnvironment))
 
 import FileChooser (spawnFileChooser)
 
@@ -67,7 +73,7 @@ renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev,psDownloadVersio
       <> (map mkCiResult ciResults) <> [ strWrap $ show psDownloadVersionInfo ]
     mkInstallers Nothing = []
     mkCiResult :: CIResult2 -> Widget Name
-    mkCiResult CIFetchedResult{cifLocal,cifResult=CIResult{ciResultUrl,ciResultDownloadUrl,ciResultBuildNumber,ciResultArch,ciResultSHA1Sum}} = B.border $ vBox
+    mkCiResult CIFetchedResult{cifLocal,cifResult=CIResult{ciResultUrl,ciResultDownloadUrl,ciResultBuildNumber,ciResultArch}} = B.border $ vBox
       [ str $ "Arch: " <> show ciResultArch
       , str $ "Local Path: " <> show cifLocal
       , txt $ "URL: " <> ciResultUrl
@@ -131,6 +137,7 @@ installerForEnv env = matchNet . installerNetwork . ciResultFilename
           ITNRW       -> n == Just InstallerITNRW
           Staging     -> n == Just InstallerStaging
           Testnet     -> n == Just InstallerTestnet
+          MainnetFlight -> n == Just InstallerMainnetFlight
           Development -> True
           _           -> False
 
@@ -274,7 +281,7 @@ rehashInstallers InstallerData{idResults} = do
   pure $ InstallerData $ InstallersResults rehashed (globalResult idResults)
 
 handleEvents :: ProposalUIState -> AppState -> BrickEvent Name CustomEvent -> EventM Name DialogReply
-handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOutputDir,psDownloadVersionInfo,psBucket,psGPGUser} _astate event = do
+handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOutputDir,psDownloadVersionInfo,psBucket,psGPGUser,psEnvironment} _astate event = do
   let
     isValidRevision :: String -> Bool
     isValidRevision = all isValidChar
@@ -306,7 +313,7 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
             let
               act :: IO Dialog
               act = do
-                res <- findInstallers psOutputDir ITNRW (T.pack $ fromJust psDaedalusRev)
+                res <- findInstallers psOutputDir psEnvironment (T.pack $ fromJust psDaedalusRev)
                 let
                   state1 = pstate { psInstallers = Just res }
                   state2 = state1 { psMenuState = generateNewMenu state1 }
@@ -325,8 +332,9 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
                 state2 = state1 { psMenuState = generateNewMenu state1 }
               pure $ mkProposalUI state2
           UpdateVersionJSON -> do
-            _url <- liftIO $ updateVersionJSON psBucket (fromJust psDownloadVersionInfo)
-            pure $ DialogReplyContinue $ mkProposalUI pstate
+            pure $ DialogReplyLiftIO $ do
+              _url <- updateVersionJSON psBucket (fromJust psDownloadVersionInfo)
+              pure $ mkProposalUI pstate
           RehashInstallers -> do
             pure $ DialogReplyLiftIO $ do
               newInstallerData <- rehashInstallers (fromJust psInstallers)

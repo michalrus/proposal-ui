@@ -24,8 +24,8 @@ import           Network.HTTP.Client       (httpLbs, parseRequest,
 import           Network.HTTP.Client.TLS   (newTlsManager)
 import           Network.HTTP.Types.Header (RequestHeaders)
 import           System.Exit               (ExitCode (ExitFailure, ExitSuccess))
-import           Data.Text                        (Text)
-import           Turtle
+import           Data.Text                 (Text)
+import           Turtle                    (FilePath, (%), s, fp, format, proc)
 
 fetchCachedUrl :: HasCallStack => T.Text -> FilePath -> FilePath -> IO ()
 fetchCachedUrl url name outPath = fetchCachedUrl' url name outPath Nothing
