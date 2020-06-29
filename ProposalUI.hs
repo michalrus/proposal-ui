@@ -23,13 +23,13 @@ import qualified Data.Vector as V
 import Types (Dialog(Dialog, dRender, dHandleEvent), AppState, Name(Menu1), DialogReply(DialogReplyContinue, DialogReplyLiftIO), CustomEvent)
 import PromptString (spawnPromptString)
 
-import Iohk.Types (Environment(Testnet, Development, Staging, Production, Nightly, ITNBC, ITNRW, MainnetFlight))
+import Iohk.Types (Environment(Testnet, Development, Staging, Production, Nightly, ITNBC, ITNRW, MainnetFlight, ShelleyTestnet))
 import Arch (Arch(Win64, Mac64, Linux64), ArchMap, archMapEach, idArchMap, archMapFromList, archMap, lookupArch)
 import UpdateLogic (InstallersResults(globalResult, ciResults, InstallersResults), CIResult2(CIFetchedResult, cifBlakeCbor, cifLocal, cifSha256, cifResult)
                    , CIResult(CIResult, ciResultUrl, ciResultDownloadUrl, ciResultBuildNumber, ciResultArch, ciResultFilename)
                    , InstallerPredicate, BucketInfo(BucketInfo, biBucket), installerPredicates, selectBuildNumberPredicate, getInstallersResults
                    , updateVersionJson, runAWS', uploadHashedInstaller, uploadSignature, hashInstallers)
-import InstallerVersions (GlobalResults(GlobalResults, grCardanoCommit, grDaedalusCommit, grApplicationVersion, grNodeVersion, grCardanoVersion, grDaedalusVersion), installerNetwork, InstallerNetwork(InstallerTestnet, InstallerStaging, InstallerMainnet, InstallerNightly, InstallerITNBC, InstallerITNRW, InstallerMainnetFlight))
+import InstallerVersions (GlobalResults(GlobalResults, grCardanoCommit, grDaedalusCommit, grApplicationVersion, grNodeVersion, grCardanoVersion, grDaedalusVersion), installerNetwork, InstallerNetwork(InstallerTestnet, InstallerStaging, InstallerMainnet, InstallerNightly, InstallerITNBC, InstallerITNRW, InstallerMainnetFlight, InstallerShelleyTestnet))
 import Github (Rev)
 import Utils (tt)
 
@@ -131,15 +131,16 @@ updateProposalSignInstallers InstallersResults{ciResults} userId = do
 installerForEnv :: Environment -> CIResult -> Bool
 installerForEnv env = matchNet . installerNetwork . ciResultFilename
   where matchNet n = case env of
-          Production  -> n == Just InstallerMainnet
-          Nightly     -> n == Just InstallerNightly
-          ITNBC       -> n == Just InstallerITNBC
-          ITNRW       -> n == Just InstallerITNRW
-          Staging     -> n == Just InstallerStaging
-          Testnet     -> n == Just InstallerTestnet
-          MainnetFlight -> n == Just InstallerMainnetFlight
-          Development -> True
-          _           -> False
+          Production     -> n == Just InstallerMainnet
+          Nightly        -> n == Just InstallerNightly
+          ITNBC          -> n == Just InstallerITNBC
+          ITNRW          -> n == Just InstallerITNRW
+          Staging        -> n == Just InstallerStaging
+          Testnet        -> n == Just InstallerTestnet
+          MainnetFlight  -> n == Just InstallerMainnetFlight
+          ShelleyTestnet -> n == Just InstallerShelleyTestnet
+          Development    -> True
+          _              -> False
 
 findInstallers :: Turtle.FilePath -> Environment -> Rev -> IO InstallerData
 findInstallers destDir env rev = do
