@@ -1,0 +1,6 @@
+{
+  "bucket":"updates-shelley-testnet",
+  "bucket-url":"updates-shelley-testnet.s3.amazonaws.com",
+  "environment":"ShelleyTestnet"
+}
+

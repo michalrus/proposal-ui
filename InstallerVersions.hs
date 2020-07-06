@@ -114,7 +114,15 @@ appVersionFromConfig key' cfg = case (ver Win64, ver Mac64) of
 ----------------------------------------------------------------------------
 
 -- | Cardano cluster which the installer will connect to.
-data InstallerNetwork = InstallerMainnet | InstallerStaging | InstallerTestnet | InstallerNightly | InstallerITNBC | InstallerITNRW | InstallerMainnetFlight deriving (Eq)
+data InstallerNetwork = InstallerMainnet
+                      | InstallerStaging
+                      | InstallerTestnet
+                      | InstallerNightly
+                      | InstallerITNBC
+                      | InstallerITNRW
+                      | InstallerMainnetFlight
+                      | InstallerShelleyTestnet
+                      deriving (Eq)
 
 instance Show InstallerNetwork where
   show InstallerMainnet = "Mainnet"
@@ -124,6 +132,7 @@ instance Show InstallerNetwork where
   show InstallerITNBC = "Incentivized Balance Check"
   show InstallerMainnetFlight = "Mainnet Flight"
   show InstallerITNRW = "Incentivized Rewards"
+  show InstallerShelleyTestnet = "Shelley Testnet"
 
 -- | Determine which cardano network an installer is for based on its
 -- filename. The inverse of this function is in
@@ -133,6 +142,7 @@ installerNetwork fpath | "mainnet-flight" `T.isInfixOf` name = Just InstallerMai
                        | "mainnet_flight" `T.isInfixOf` name = Just InstallerMainnetFlight
                        | "mainnet" `T.isInfixOf` name = Just InstallerMainnet
                        | "staging" `T.isInfixOf` name = Just InstallerStaging
+                       | "shelley_testnet" `T.isInfixOf` name = Just InstallerShelleyTestnet
                        | "testnet" `T.isInfixOf` name = Just InstallerTestnet
                        | "itn_balance_check" `T.isInfixOf` name = Just InstallerITNBC
                        | "itn_rewards_v1" `T.isInfixOf` name = Just InstallerITNRW
