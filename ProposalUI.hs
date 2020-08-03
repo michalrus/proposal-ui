@@ -5,6 +5,7 @@
 module ProposalUI (spawnProposalUI) where
 
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import           Data.Maybe (isJust, fromJust)
 import           Control.Monad.Managed (Managed, MonadIO)
 import qualified System.Process             as P
@@ -361,7 +362,8 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
               act = do
                 createDirectoryIfMissing True $ FP.encodeString psOutputDir
                 rawFiles <- listDirectory "installers/"
-                res2 <- mapM (fileToResult . T.pack) rawFiles
+                res2 <- mapM (fileToResult . T.pack) (filter (/= "version") rawFiles)
+                daedalusVer <- T.readFile "installers/version"
                 let
                   globalStatus = GlobalResults
                     { grCardanoCommit = "missing"
@@ -369,7 +371,7 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
                     , grNodeVersion = "missing"
                     , grApplicationVersion = 0
                     , grCardanoVersion = "missing"
-                    , grDaedalusVersion = "missing FIXME"
+                    , grDaedalusVersion = T.dropAround (== '\n') daedalusVer
                     }
                   results = InstallersResults
                     { ciResults = res2
