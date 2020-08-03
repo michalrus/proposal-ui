@@ -8,11 +8,13 @@ import qualified Data.Text as T
 import           Data.Maybe (isJust, fromJust)
 import           Control.Monad.Managed (Managed, MonadIO)
 import qualified System.Process             as P
-import           Turtle (FilePath, Shell, system, empty,single,die,format,(%),w,printf,s,fp, (<.>), testfile, readTextFile, join, fromString, encodeString, with, liftIO)
+import           Turtle (FilePath, Shell, system, empty,single,die,format,(%),w,printf,s,fp, (<.>), testfile, readTextFile, join, fromString, encodeString, with, liftIO, cp, (</>))
 import           Data.Time.Clock (getCurrentTime)
 import           Data.Time.Format (formatTime, defaultTimeLocale, iso8601DateFormat)
 import qualified Data.ByteString.Lazy.Char8 as L8
 import           Data.Aeson (Value, encode, toJSON, eitherDecodeFileStrict')
+import qualified Filesystem.Path.CurrentOS        as FP
+import           System.Directory (listDirectory, createDirectoryIfMissing)
 
 import Brick (Widget, BrickEvent(VtyEvent), EventM, vBox, str, strWrap, txt, padLeftRight)
 import qualified Graphics.Vty as V
@@ -20,21 +22,23 @@ import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as L
 import qualified Data.Vector as V
 
+
 import Types (Dialog(Dialog, dRender, dHandleEvent), AppState, Name(Menu1), DialogReply(DialogReplyContinue, DialogReplyLiftIO), CustomEvent)
 import PromptString (spawnPromptString)
 
 import Iohk.Types (Environment(Testnet, Development, Staging, Production, Nightly, ITNBC, ITNRW, MainnetFlight, ShelleyTestnet))
 import Arch (Arch(Win64, Mac64, Linux64), ArchMap, archMapEach, idArchMap, archMapFromList, archMap, lookupArch)
 import UpdateLogic (InstallersResults(globalResult, ciResults, InstallersResults), CIResult2(CIFetchedResult, cifBlakeCbor, cifLocal, cifSha256, cifResult)
-                   , CIResult(CIResult, ciResultUrl, ciResultDownloadUrl, ciResultBuildNumber, ciResultArch, ciResultFilename)
+                   , CIResult(CIResult, ciResultUrl, ciResultDownloadUrl, ciResultBuildNumber, ciResultArch, ciResultFilename, ciResultSystem, ciResultSHA1Sum)
                    , InstallerPredicate, BucketInfo(BucketInfo, biBucket), installerPredicates, selectBuildNumberPredicate, getInstallersResults
+                   , CISystem(Buildkite)
                    , updateVersionJson, runAWS', uploadHashedInstaller, uploadSignature, hashInstallers)
 import InstallerVersions (GlobalResults(GlobalResults, grCardanoCommit, grDaedalusCommit, grApplicationVersion, grNodeVersion, grCardanoVersion, grDaedalusVersion), installerNetwork, InstallerNetwork(InstallerTestnet, InstallerStaging, InstallerMainnet, InstallerNightly, InstallerITNBC, InstallerITNRW, InstallerMainnetFlight, InstallerShelleyTestnet))
 import Github (Rev)
 import Utils (tt)
 
 import ProposalUI.Types (ProposalUIState(psDownloadVersionInfo,psMenuState,psDaedalusRev,psInstallers,psEnvironment,psBucket,psGPGUser,ProposalUIState,psOutputDir,psCallback)
-                        , MenuChoices(SetGPGUser, SelectCluster, SetDaedalusRev, FindInstallers, SignInstallers, S3Upload, UpdateVersionJSON, RehashInstallers)
+                        , MenuChoices(SetGPGUser, SelectCluster, SetDaedalusRev, FindInstallers, SignInstallers, S3Upload, UpdateVersionJSON, RehashInstallers, LocalInstallers)
                         , InstallerData(InstallerData, idResults), DownloadVersionInfo(DownloadVersionInfo, dviVersion, dviURL, dviHash, dviSignature, dviSHA256)
                         , DownloadVersionJson(DownloadVersionJson), ClusterConfig(ccBucket, ccBucketURL, ccEnvironment))
 
@@ -47,7 +51,7 @@ generateNewMenu :: ProposalUIState -> L.List Name MenuChoices
 generateNewMenu ProposalUIState{psDaedalusRev,psInstallers,psDownloadVersionInfo} = L.list Menu1 (V.fromList thelist) 1
   where
     thelist = [ SetGPGUser, SelectCluster, SetDaedalusRev ] <> maybeFindInstallers <> maybeSign <> maybeUpload <> maybeSetVersion
-    maybeFindInstallers = if (isJust psDaedalusRev) then [ FindInstallers ] else []
+    maybeFindInstallers = if (isJust psDaedalusRev) then [ FindInstallers, LocalInstallers ] else []
     maybeSign = if (isJust psInstallers) then [ RehashInstallers, SignInstallers ] else []
     maybeUpload = if (isJust psInstallers) then [ S3Upload ] else []
     maybeSetVersion = if (isJust psDownloadVersionInfo) then [ UpdateVersionJSON ] else []
@@ -91,14 +95,15 @@ renderUI ProposalUIState{psMenuState,psInstallers,psDaedalusRev,psDownloadVersio
     menu :: Widget Name
     menu = B.borderWithLabel (str "Menu") $ padLeftRight 1 $ L.renderList renderRow True psMenuState
     renderRow :: Bool -> MenuChoices -> Widget Name
-    renderRow _ SetGPGUser = str "Set GPG User"
-    renderRow _ SetDaedalusRev = str "Set Daedalus Revision"
-    renderRow _ FindInstallers = str "Find Installers"
-    renderRow _ SignInstallers = str "Sign installers with GPG"
-    renderRow _ S3Upload = str "Upload Installers to S3"
-    renderRow _ UpdateVersionJSON = str "Set daedalus-latest-version.json"
-    renderRow _ RehashInstallers = str "Rehash installer"
-    renderRow _ SelectCluster = str "Select Cluster"
+    renderRow _ SetGPGUser = str "1: Set GPG User (optional)"
+    renderRow _ SelectCluster = str "2: Select Cluster"
+    renderRow _ SetDaedalusRev = str "3: Set Daedalus Revision"
+    renderRow _ FindInstallers = str "4a: Find Installers"
+    renderRow _ LocalInstallers = str "4b: use local installers in installers/"
+    renderRow _ RehashInstallers = str "5: Rehash installer (optional)"
+    renderRow _ SignInstallers = str "6: Sign installers with GPG (optional)"
+    renderRow _ S3Upload = str "7: Upload Installers to S3"
+    renderRow _ UpdateVersionJSON = str "8: Set daedalus-latest-version.json"
 
 configurationKeys :: Environment -> Arch -> T.Text
 configurationKeys Production Win64   = "mainnet_wallet_win64"
@@ -317,6 +322,60 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
                 res <- findInstallers psOutputDir psEnvironment (T.pack $ fromJust psDaedalusRev)
                 let
                   state1 = pstate { psInstallers = Just res }
+                  state2 = state1 { psMenuState = generateNewMenu state1 }
+                pure $ mkProposalUI state2
+            pure $ DialogReplyLiftIO act
+          LocalInstallers -> do
+            let
+              nameToArch :: T.Text -> Arch
+              nameToArch fn | T.isSuffixOf ".pkg" fn = Mac64
+                            | T.isSuffixOf ".bin" fn = Linux64
+                            | T.isSuffixOf ".exe" fn = Win64
+              fileToResult :: T.Text -> IO CIResult2
+              fileToResult name = do
+                print "fileToResult"
+                print name
+                let
+                  arch = nameToArch name
+                  res1 = CIResult
+                    { ciResultSystem = Buildkite
+                    , ciResultUrl = "missing"
+                    , ciResultDownloadUrl = "missing"
+                    , ciResultBuildNumber = 0
+                    , ciResultArch = arch
+                    , ciResultSHA1Sum = Nothing
+                    , ciResultFilename = FP.fromText name
+                  }
+                  localDest = (psOutputDir </> (FP.fromText name))
+                cp ("installers" </> (FP.fromText name)) localDest
+                (blakecbor, sha256) <- hashInstallers localDest
+                let
+                  res2 = CIFetchedResult
+                    { cifResult = res1
+                    , cifLocal = localDest
+                    , cifBlakeCbor = blakecbor
+                    , cifSha256 = sha256
+                    }
+                pure res2
+              act :: IO Dialog
+              act = do
+                createDirectoryIfMissing True $ FP.encodeString psOutputDir
+                rawFiles <- listDirectory "installers/"
+                res2 <- mapM (fileToResult . T.pack) rawFiles
+                let
+                  globalStatus = GlobalResults
+                    { grCardanoCommit = "missing"
+                    , grDaedalusCommit = T.pack $ fromJust $ psDaedalusRev
+                    , grNodeVersion = "missing"
+                    , grApplicationVersion = 0
+                    , grCardanoVersion = "missing"
+                    , grDaedalusVersion = "missing FIXME"
+                    }
+                  results = InstallersResults
+                    { ciResults = res2
+                    , globalResult = globalStatus
+                    }
+                  state1 = pstate { psInstallers = Just $ InstallerData results }
                   state2 = state1 { psMenuState = generateNewMenu state1 }
                 pure $ mkProposalUI state2
             pure $ DialogReplyLiftIO act

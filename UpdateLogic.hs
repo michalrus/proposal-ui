@@ -14,6 +14,7 @@ module UpdateLogic
   , InstallersResults(..)
   , CIResult2(..)
   , CIResult(..)
+  , CISystem(..)
   , BucketInfo(..)
   , InstallerPredicate
   , installerPredicates
@@ -289,7 +290,7 @@ hashInstallers :: Turtle.FilePath -> IO (Digest Blake2b_256, Digest SHA256)
 hashInstallers path = do
   printf ("reading " % fp % " into ram...\n") path
   rawData <- BS.readFile $ FP.encodeString path
-  printf "hasing it twice...\n"
+  printf "HASHing it twice...\n"
   let
     blakecbor = installerHash rawData
     sha256 :: Digest SHA256
