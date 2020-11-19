@@ -27,14 +27,14 @@ import qualified Data.Vector as V
 import Types (Dialog(Dialog, dRender, dHandleEvent), AppState, Name(Menu1), DialogReply(DialogReplyContinue, DialogReplyLiftIO), CustomEvent)
 import PromptString (spawnPromptString)
 
-import Iohk.Types (Environment(Testnet, Development, Staging, Production, Nightly, ITNBC, ITNRW, MainnetFlight, ShelleyTestnet))
+import Iohk.Types (Environment(Testnet, Development, Staging, Production, Nightly, ITNBC, ITNRW, MainnetFlight, ShelleyTestnet, MainnetCatalyst))
 import Arch (Arch(Win64, Mac64, Linux64), ArchMap, archMapEach, idArchMap, archMapFromList, archMap, lookupArch)
 import UpdateLogic (InstallersResults(globalResult, ciResults, InstallersResults), CIResult2(CIFetchedResult, cifBlakeCbor, cifLocal, cifSha256, cifResult)
                    , CIResult(CIResult, ciResultUrl, ciResultDownloadUrl, ciResultBuildNumber, ciResultArch, ciResultFilename, ciResultSystem, ciResultSHA1Sum)
                    , InstallerPredicate, BucketInfo(BucketInfo, biBucket), installerPredicates, selectBuildNumberPredicate, getInstallersResults
                    , CISystem(Buildkite)
                    , updateVersionJson, runAWS', uploadHashedInstaller, uploadSignature, hashInstallers)
-import InstallerVersions (GlobalResults(GlobalResults, grCardanoCommit, grDaedalusCommit, grApplicationVersion, grNodeVersion, grCardanoVersion, grDaedalusVersion), installerNetwork, InstallerNetwork(InstallerTestnet, InstallerStaging, InstallerMainnet, InstallerNightly, InstallerITNBC, InstallerITNRW, InstallerMainnetFlight, InstallerShelleyTestnet))
+import InstallerVersions (GlobalResults(GlobalResults, grCardanoCommit, grDaedalusCommit, grApplicationVersion, grNodeVersion, grCardanoVersion, grDaedalusVersion), installerNetwork, InstallerNetwork(InstallerTestnet, InstallerStaging, InstallerMainnet, InstallerNightly, InstallerITNBC, InstallerITNRW, InstallerMainnetFlight, InstallerShelleyTestnet, InstallerMainnetCatalyst))
 import Github (Rev)
 import Utils (tt)
 
@@ -145,6 +145,7 @@ installerForEnv env = matchNet . installerNetwork . ciResultFilename
           Testnet        -> n == Just InstallerTestnet
           MainnetFlight  -> n == Just InstallerMainnetFlight
           ShelleyTestnet -> n == Just InstallerShelleyTestnet
+          MainnetCatalyst -> n == Just InstallerMainnetCatalyst
           Development    -> True
           _              -> False
 
@@ -334,7 +335,7 @@ handleEvents pstate@ProposalUIState{psMenuState,psDaedalusRev,psInstallers,psOut
                             | T.isSuffixOf ".exe" fn = Win64
               fileToResult :: T.Text -> IO CIResult2
               fileToResult name = do
-                print "fileToResult"
+                print ("fileToResult"::String)
                 print name
                 let
                   arch = nameToArch name

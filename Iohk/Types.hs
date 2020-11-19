@@ -32,6 +32,7 @@ data Environment
   | ITNRW
   | MainnetFlight
   | ShelleyTestnet
+  | MainnetCatalyst
   deriving (Bounded, Eq, Enum, Generic, Read, Show)
 
 instance FromJSON Environment
