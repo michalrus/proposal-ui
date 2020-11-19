@@ -143,7 +143,7 @@ listArtifactsForBuild :: APIToken      -- ^ token generated in buildkite setting
 listArtifactsForBuild t org pipeline buildNum = getResponseBody <$> httpJSON req
   where
     req = makeRequest t path
-    path = buildPath org pipeline buildNum ++ [ "artifacts" ]
+    path = buildPath org pipeline buildNum ++ [ "artifacts?per_page=100" ]
 
 -- | Returns the URL for downloading an artifact.
 -- Although the returned URL might be in our own public S3 bucket,

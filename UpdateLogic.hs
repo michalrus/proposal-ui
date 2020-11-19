@@ -199,7 +199,13 @@ getInstallersResults keys instP daedalusRev destDir = do
 
 handleCIResults :: InstallerPredicate -> Turtle.FilePath -> Either Text [CIResult] -> IO [CIResult2]
 handleCIResults instP destDir (Right rs) = do
+  print rs
   let rs' = filter instP rs
+  mapM_ (\result -> do
+    print result
+    print $ (installerNetwork . ciResultFilename) result
+    ) rs
+  print rs'
   fetchCIResults destDir rs'
 handleCIResults _ _ (Left msg) = T.putStrLn msg >> pure []
 

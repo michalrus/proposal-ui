@@ -1,6 +1,6 @@
 {
-  "bucket":"proposal-ui-test",
-  "bucket-url":"proposal-ui-test.s3.amazonaws.com",
+  "bucket":"update-cardano-mainnet.iohk.io",
+  "bucket-url":"update-cardano-mainnet.iohk.io",
   "environment":"Production"
 }
 
