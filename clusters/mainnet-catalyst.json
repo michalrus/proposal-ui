@@ -1,0 +1,5 @@
+{
+  "bucket":"iohk-vit-installers",
+  "bucket-url":"iohk-vit-installers.s3.amazonaws.com",
+  "environment":"MainnetCatalyst"
+}

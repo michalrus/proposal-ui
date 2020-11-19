@@ -30,6 +30,28 @@ data GlobalResults = GlobalResults {
     , grDaedalusVersion    :: Text
   } deriving (Show)
 
+-- | Cardano cluster which the installer will connect to.
+data InstallerNetwork = InstallerMainnet
+                      | InstallerStaging
+                      | InstallerTestnet
+                      | InstallerNightly
+                      | InstallerITNBC
+                      | InstallerITNRW
+                      | InstallerMainnetFlight
+                      | InstallerShelleyTestnet
+                      | InstallerMainnetCatalyst
+                      deriving (Eq)
+
+instance Show InstallerNetwork where
+  show InstallerMainnet         = "Mainnet"
+  show InstallerStaging         = "Staging"
+  show InstallerTestnet         = "Testnet"
+  show InstallerNightly         = "Nightly"
+  show InstallerITNBC           = "Incentivized Balance Check"
+  show InstallerMainnetFlight   = "Mainnet Flight"
+  show InstallerITNRW           = "Incentivized Rewards"
+  show InstallerShelleyTestnet  = "Shelley Testnet"
+  show InstallerMainnetCatalyst = "Mainnet Catalyst"
 
 findVersionInfo :: ApplicationVersionKey -> Rev -> Managed GlobalResults
 findVersionInfo _keys grDaedalusCommit = do
@@ -113,33 +135,13 @@ appVersionFromConfig key' cfg = case (ver Win64, ver Mac64) of
 
 ----------------------------------------------------------------------------
 
--- | Cardano cluster which the installer will connect to.
-data InstallerNetwork = InstallerMainnet
-                      | InstallerStaging
-                      | InstallerTestnet
-                      | InstallerNightly
-                      | InstallerITNBC
-                      | InstallerITNRW
-                      | InstallerMainnetFlight
-                      | InstallerShelleyTestnet
-                      deriving (Eq)
-
-instance Show InstallerNetwork where
-  show InstallerMainnet = "Mainnet"
-  show InstallerStaging = "Staging"
-  show InstallerTestnet = "Testnet"
-  show InstallerNightly = "Nightly"
-  show InstallerITNBC = "Incentivized Balance Check"
-  show InstallerMainnetFlight = "Mainnet Flight"
-  show InstallerITNRW = "Incentivized Rewards"
-  show InstallerShelleyTestnet = "Shelley Testnet"
-
 -- | Determine which cardano network an installer is for based on its
 -- filename. The inverse of this function is in
 -- daedalus/installers/Types.hs.
 installerNetwork :: Turtle.FilePath -> Maybe InstallerNetwork
 installerNetwork fpath | "mainnet-flight" `T.isInfixOf` name = Just InstallerMainnetFlight
                        | "mainnet_flight" `T.isInfixOf` name = Just InstallerMainnetFlight
+                       | "mainnet_catalyst" `T.isInfixOf` name = Just InstallerMainnetCatalyst
                        | "mainnet" `T.isInfixOf` name = Just InstallerMainnet
                        | "staging" `T.isInfixOf` name = Just InstallerStaging
                        | "shelley_testnet" `T.isInfixOf` name = Just InstallerShelleyTestnet
