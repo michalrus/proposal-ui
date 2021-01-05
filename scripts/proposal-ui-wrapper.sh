@@ -7,7 +7,7 @@ INSTRUCTIONS=(
 "Some keybindings are:\n\n"
 "   <tab>    Move between panels\n"
 "<arrows>    Move between panels and text\n"
-" <space>    Update bottom text highlighted\n"
+" <space>    Update bottom text w/ selected\n"
 " <enter>    Choose bottom text target\n"
 "<typing>    Type bottom text target\n"
 "   <esc>    Abort"
