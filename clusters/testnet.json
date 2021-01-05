@@ -1,0 +1,5 @@
+{
+  "bucket":"updates-cardano-testnet",
+  "bucket-url":"updates-cardano-testnet.s3.amazonaws.com",
+  "environment":"Testnet"
+}
