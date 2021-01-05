@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -u
 
 INSTRUCTIONS=(
 "The next screen will allow the selection of proposal UI credentials.\n\n"
@@ -21,10 +21,10 @@ CONFIRM=(
 while true; do
   dialog --title 'Proposal UI Credentials Selection' --msgbox "${INSTRUCTIONS[*]}" 15 48 || { echo "Instructions cancelled -- aborting"; exit 1; }
   CREDS=$(dialog --stdout --title "Choose a Proposal UI Credentials File" --fselect "$DIR" 14 68) || { echo "File selection cancelled -- aborting"; exit 1; }
-  dialog --title "Confirm Credentials Selection" --yesno "${CONFIRM[*]}${CREDS}" 8 68
-  status=$?
-  [ "$status" -eq 0 ] && break
-  [ "$status" -eq 255 ] && { echo "Confirmation cancelled -- aborting"; exit 1; }
+  dialog --stdout --title "Confirm Credentials Selection" --yesno "${CONFIRM[*]}${CREDS}" 8 68
+  STATUS=$?
+  [ "$STATUS" -eq 0 ] && break
+  [ "$STATUS" -eq 255 ] && { echo "Confirmation cancelled -- aborting"; exit 1; }
 done
 
 set -o allexport
