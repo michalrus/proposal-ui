@@ -88,7 +88,7 @@ import           Turtle                           (MonadIO, d, die, format, fp, 
 import System.IO (stdout)
 
 import           InstallerVersions                (GlobalResults (GlobalResults, grApplicationVersion, grCardanoCommit, grCardanoVersion, grDaedalusCommit, grDaedalusVersion),
-                                                   InstallerNetwork (InstallerMainnet, InstallerStaging, InstallerTestnet),
+                                                   InstallerNetwork (InstallerMainnet, InstallerStaging, InstallerTestnet, InstallerPreview, InstallerPreprod),
                                                    findVersionInfo,
                                                    installerNetwork)
 import           Iohk.Types                            (ApplicationVersion)
@@ -333,6 +333,8 @@ formatCIResults rs = T.unlines $ ["CI links:"] ++ ciLinks
                      ++ [""] ++ instLinks InstallerMainnet
                      ++ [""] ++ instLinks InstallerStaging
                      ++ [""] ++ instLinks InstallerTestnet
+                     ++ [""] ++ instLinks InstallerPreview
+                     ++ [""] ++ instLinks InstallerPreprod
   where
     getInner :: CIResult2 -> CIResult
     getInner CIFetchedResult{cifResult} = cifResult
