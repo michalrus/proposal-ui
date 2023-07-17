@@ -1,0 +1,102 @@
+diff --git a/src/Network/AWS/Data/Body.hs b/src/Network/AWS/Data/Body.hs
+index addb384..d7fb52a 100644
+--- a/src/Network/AWS/Data/Body.hs
++++ b/src/Network/AWS/Data/Body.hs
+@@ -22,6 +22,7 @@ module Network.AWS.Data.Body where
+ 
+ import           Control.Monad.Trans.Resource
+ import           Data.Aeson
++import qualified Data.Aeson.KeyMap
+ import qualified Data.ByteString              as BS
+ import           Data.ByteString.Builder      (Builder)
+ import qualified Data.ByteString.Char8        as BS8
+@@ -195,7 +196,7 @@ instance ToHashedBody Element        where toHashed = toHashed . encodeXML
+ instance ToHashedBody QueryString    where toHashed = toHashed . toBS
+ 
+ instance ToHashedBody (HashMap Text Value) where
+-    toHashed = toHashed . Object
++    toHashed = toHashed . Object . Data.Aeson.KeyMap.fromHashMapText
+ 
+ -- | Anything that can be converted to a streaming request 'Body'.
+ class ToBody a where
+diff --git a/src/Network/AWS/Data/ByteString.hs b/src/Network/AWS/Data/ByteString.hs
+index 9683909..d733fe2 100644
+--- a/src/Network/AWS/Data/ByteString.hs
++++ b/src/Network/AWS/Data/ByteString.hs
+@@ -28,7 +28,7 @@ import           Data.ByteString              (ByteString)
+ import           Data.ByteString.Builder      (Builder)
+ import qualified Data.ByteString.Char8        as BS8
+ import qualified Data.ByteString.Lazy         as LBS
+-import qualified Data.ByteString.Lazy.Builder as Build
++import qualified Data.ByteString.Builder      as Build
+ import           Data.CaseInsensitive         (CI)
+ import qualified Data.CaseInsensitive         as CI
+ import           Data.Char
+diff --git a/src/Network/AWS/Data/JSON.hs b/src/Network/AWS/Data/JSON.hs
+index a3b11b0..cf074a5 100644
+--- a/src/Network/AWS/Data/JSON.hs
++++ b/src/Network/AWS/Data/JSON.hs
+@@ -37,7 +37,8 @@ module Network.AWS.Data.JSON
+ 
+ import           Data.Aeson            (eitherDecode, eitherDecode')
+ import           Data.Aeson.Types
+-import qualified Data.HashMap.Strict   as Map
++import qualified Data.Aeson.KeyMap     as Map
++import qualified Data.Aeson.Key        as Key
+ import           Network.AWS.Data.Text
+ 
+ parseJSONText :: FromText a => String -> Value -> Parser a
+@@ -51,12 +52,12 @@ eitherParseJSON = parseEither parseJSON . Object
+ 
+ (.:>) :: FromJSON a => Object -> Text -> Either String a
+ (.:>) o k =
+-    case Map.lookup k o of
++    case Map.lookup (Key.fromText k) o of
+         Nothing -> Left $ "key " ++ show k ++ " not present"
+         Just v  -> parseEither parseJSON v
+ 
+ (.?>) :: FromJSON a => Object -> Text -> Either String (Maybe a)
+ (.?>) o k =
+-    case Map.lookup k o of
++    case Map.lookup (Key.fromText k) o of
+         Nothing -> Right Nothing
+         Just v  -> parseEither parseJSON v
+diff --git a/src/Network/AWS/Data/Log.hs b/src/Network/AWS/Data/Log.hs
+index b0a297c..54875ac 100644
+--- a/src/Network/AWS/Data/Log.hs
++++ b/src/Network/AWS/Data/Log.hs
+@@ -19,7 +19,7 @@ module Network.AWS.Data.Log where
+ import qualified Data.ByteString              as BS
+ import           Data.ByteString.Builder      (Builder)
+ import qualified Data.ByteString.Lazy         as LBS
+-import qualified Data.ByteString.Lazy.Builder as Build
++import qualified Data.ByteString.Builder      as Build
+ import           Data.CaseInsensitive         (CI)
+ import qualified Data.CaseInsensitive         as CI
+ import           Data.Int
+diff --git a/src/Network/AWS/Data/Map.hs b/src/Network/AWS/Data/Map.hs
+index 196575b..0199340 100644
+--- a/src/Network/AWS/Data/Map.hs
++++ b/src/Network/AWS/Data/Map.hs
+@@ -25,6 +25,7 @@ module Network.AWS.Data.Map
+ 
+ import           Control.DeepSeq
+ import           Data.Aeson
++import qualified Data.Aeson.Key
+ import           Data.Bifunctor
+ import qualified Data.ByteString             as BS
+ import qualified Data.CaseInsensitive        as CI
+@@ -80,11 +81,11 @@ instance (Eq k, Hashable k, FromText k, FromJSON v) => FromJSON (Map k v) where
+     parseJSON = withObject "HashMap" (fmap fromList . traverse f . toList)
+       where
+         f (k, v) = (,)
+-            <$> either fail return (fromText k)
++            <$> either fail return (fromText (Data.Aeson.Key.toText k))
+             <*> parseJSON v
+ 
+ instance (Eq k, Hashable k, ToText k, ToJSON v) => ToJSON (Map k v) where
+-    toJSON = Object . fromList . map (bimap toText toJSON) . toList
++    toJSON = Object . fromList . map (bimap (Data.Aeson.Key.fromText . toText) toJSON) . toList
+ 
+ instance (Eq k, Hashable k, ToByteString k, ToText v) => ToHeader (Map k v) where
+     toHeader p = map (bimap k v) . toList

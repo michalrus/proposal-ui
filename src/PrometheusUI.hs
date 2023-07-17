@@ -8,7 +8,7 @@ import           Types (Name, Dialog(Dialog,dRender,dHandleEvent), DialogReply(D
 import qualified Graphics.Vty as V
 
 import           Control.Monad.IO.Class                         (liftIO)
-import           System.Metrics.Prometheus.Http.Scrape (serveHttpTextMetricsT)
+import           System.Metrics.Prometheus.Http.Scrape (serveMetricsT)
 import           System.Metrics.Prometheus.Concurrent.RegistryT (runRegistryT, registerCounter, RegistryT(RegistryT, unRegistryT))
 import           System.Metrics.Prometheus.Metric.Counter       (inc, Counter)
 import           System.Metrics.Prometheus.MetricId (fromList)
@@ -38,7 +38,7 @@ startServer = do
   runRegistryT $ do
     connectCounter <- registerCounter "brick_events" (fromList [("key","value")])
     registry <- RegistryT ask
-    server <- liftIO $ async $ runReaderT (unRegistryT $ serveHttpTextMetricsT 8080 []) registry
+    server <- liftIO $ async $ runReaderT (unRegistryT $ serveMetricsT 8080 []) registry
     pure (connectCounter, server)
 
 renderUI :: PrometheusState -> AppState -> [ Widget Name ]
